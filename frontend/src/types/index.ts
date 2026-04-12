@@ -98,6 +98,7 @@ export interface User {
   email: string;
   display_name: string | null;
   personal_account_connected: boolean;
+  is_admin: boolean;
 }
 
 export interface AuthStatus {
@@ -122,4 +123,16 @@ export interface CalendarItem {
   id: string;
   summary: string;
   primary: boolean;
+}
+
+export type InviteStatus = "pending" | "accepted" | "expired";
+
+export interface Invite {
+  id: number;
+  email: string;
+  token: string;
+  created_at: string;
+  accepted_at: string | null;
+  expires_at: string | null;
+  status: InviteStatus;
 }

@@ -2,20 +2,69 @@
 FlowList — FastAPI application entry point.
 """
 
+import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 from app.config import settings
-from app.routers import ai, auth, review_prompts, settings as settings_router, tasks, watchdog
+from app.routers import ai, auth, invites, review_prompts, settings as settings_router, tasks, watchdog
+
+log = logging.getLogger("flowlist.access")
+
+# Paths excluded from access logging (too noisy)
+_LOG_SKIP = {"/api/auth/me", "/api/healthz", "/health"}
+
+
+# ── Request logging middleware ────────────────────────────────────────────────
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        if request.url.path in _LOG_SKIP:
+            return await call_next(request)
+
+        start = time.perf_counter()
+
+        # Decode session cookie to get user_id (best-effort)
+        user_id: int | None = None
+        try:
+            from app.services.auth_service import decode_session_cookie, COOKIE_NAME
+            cookie = request.cookies.get(COOKIE_NAME)
+            if cookie:
+                user_id = decode_session_cookie(cookie)
+        except Exception:
+            pass
+
+        from app.services.rate_limit import get_client_ip
+        client_ip = get_client_ip(request)
+
+        response = await call_next(request)
+        duration_ms = (time.perf_counter() - start) * 1000
+
+        log.info(
+            "%s %s %d %.1fms ip=%s user=%s",
+            request.method,
+            request.url.path,
+            response.status_code,
+            duration_ms,
+            client_ip,
+            user_id if user_id is not None else "-",
+        )
+        return response
+
+
+# ── App lifespan ──────────────────────────────────────────────────────────────
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────────────────────
-    # Warm the Redis connection pool
     from app.services.redis_client import get_redis
     redis = get_redis()
     await redis.ping()
@@ -29,11 +78,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="FlowList",
-    version="0.1.0",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
+# ── Middleware ────────────────────────────────────────────────────────────────
+
 _origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -42,6 +92,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestLoggingMiddleware)
 
 # ── Global exception handler — converts HTTPException to envelope format ──────
 
@@ -52,6 +103,7 @@ _STATUS_TO_CODE = {
     404: "not_found",
     409: "conflict",
     422: "validation_error",
+    429: "rate_limited",
     502: "upstream_error",
 }
 
@@ -69,12 +121,17 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 app.include_router(auth.router)
 app.include_router(tasks.router)
 app.include_router(ai.router)
+app.include_router(invites.router)
 app.include_router(review_prompts.router)
 app.include_router(watchdog.router)
 app.include_router(settings_router.router)
 
 
-# ── Health check ─────────────────────────────────────────────────────────────
+# ── Health checks ─────────────────────────────────────────────────────────────
+
+
+@app.get("/health", tags=["health"], include_in_schema=False)
 @app.get("/api/healthz", tags=["health"])
 async def healthz() -> dict:
+    """Health check — used by Cloudflare, Docker, and load balancers."""
     return {"status": "ok", "version": app.version}

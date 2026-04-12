@@ -11,9 +11,9 @@ export default defineConfig({
     alias: { "@": path.resolve(__dirname, "./src") },
   },
   server: {
-    // Allow all hosts so requests proxied through Caddy (which uses the
-    // original Host header) are not rejected by Vite's host check.
-    allowedHosts: true,
+    // Explicit allowlist — requests arriving via Caddy carry the original
+    // Host header (taskflowlist.com), so Vite must accept it.
+    allowedHosts: ["localhost", "taskflowlist.com", "www.taskflowlist.com"],
     proxy: {
       // Forward /api/* to FastAPI backend in dev (when running Vite directly,
       // not through Caddy). In Docker, Caddy handles this routing instead.

@@ -1,9 +1,12 @@
-// Settings page — scheduling preferences, timezone, Google account connections.
+// Settings page — scheduling preferences, timezone, Google account connections,
+// and admin invite management.
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { settingsApi, type UpdateSettings } from "../services/settings";
-import type { CalendarItem } from "../types";
+import { invitesApi } from "../services/invites";
+import { useAuth } from "../hooks/useAuth";
+import type { CalendarItem, Invite } from "../types";
 
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => ({
   value: i,
@@ -92,8 +95,163 @@ function CalendarSelect({
   );
 }
 
+// ── Invite management (admin only) ────────────────────────────────────────────
+
+function InviteRow({
+  invite,
+  onRevoke,
+}: {
+  invite: Invite;
+  onRevoke: (id: number) => void;
+}) {
+  const inviteUrl = `${window.location.origin}/invite?token=${invite.token}`;
+  const [copied, setCopied] = useState(false);
+
+  function copyLink() {
+    navigator.clipboard.writeText(inviteUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  const statusColor =
+    invite.status === "accepted"
+      ? "text-green-700 bg-green-50"
+      : invite.status === "expired"
+      ? "text-gray-400 bg-gray-100"
+      : "text-blue-700 bg-blue-50";
+
+  return (
+    <div className="flex items-center gap-3 py-2">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-gray-800 truncate">{invite.email}</p>
+        <p className="text-xs text-gray-400">
+          {new Date(invite.created_at).toLocaleDateString()}
+          {invite.accepted_at && (
+            <> · accepted {new Date(invite.accepted_at).toLocaleDateString()}</>
+          )}
+        </p>
+      </div>
+      <span
+        className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${statusColor}`}
+      >
+        {invite.status}
+      </span>
+      {invite.status === "pending" && (
+        <button
+          onClick={copyLink}
+          className="text-xs text-blue-600 hover:underline shrink-0"
+        >
+          {copied ? "Copied!" : "Copy link"}
+        </button>
+      )}
+      {invite.status !== "accepted" && (
+        <button
+          onClick={() => onRevoke(invite.id)}
+          className="text-xs text-red-400 hover:text-red-600 shrink-0"
+        >
+          Revoke
+        </button>
+      )}
+    </div>
+  );
+}
+
+function InviteSection() {
+  const qc = useQueryClient();
+  const [email, setEmail] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const { data: invites = [], isLoading } = useQuery<Invite[]>({
+    queryKey: ["invites"],
+    queryFn: invitesApi.list,
+    staleTime: 30_000,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (e: string) => invitesApi.create(e),
+    onSuccess: (newInvite) => {
+      qc.setQueryData<Invite[]>(["invites"], (prev = []) => [newInvite, ...prev]);
+      setEmail("");
+      setCreateError(null);
+    },
+    onError: (err: Error) => setCreateError(err.message),
+  });
+
+  const revokeMutation = useMutation({
+    mutationFn: (id: number) => invitesApi.revoke(id),
+    onSuccess: (_data, id) => {
+      qc.setQueryData<Invite[]>(["invites"], (prev = []) =>
+        prev.filter((i) => i.id !== id)
+      );
+    },
+  });
+
+  function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = email.trim();
+    if (!trimmed) return;
+    createMutation.mutate(trimmed);
+  }
+
+  return (
+    <section className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
+      <div className="px-5 py-4">
+        <h2 className="font-semibold text-gray-800 text-sm">Invites</h2>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Users need an invite link to create an account. Copy and share the
+          link manually.
+        </p>
+      </div>
+
+      {/* Create invite */}
+      <div className="px-5 py-4">
+        <form onSubmit={handleCreate} className="flex gap-2">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="user@example.com"
+            className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            type="submit"
+            disabled={createMutation.isPending || !email.trim()}
+            className="text-sm px-4 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
+          >
+            {createMutation.isPending ? "..." : "Invite"}
+          </button>
+        </form>
+        {createError && (
+          <p className="text-xs text-red-500 mt-2">{createError}</p>
+        )}
+      </div>
+
+      {/* Invite list */}
+      <div className="px-5 py-2">
+        {isLoading && (
+          <p className="text-sm text-gray-400 py-2">Loading invites...</p>
+        )}
+        {!isLoading && invites.length === 0 && (
+          <p className="text-sm text-gray-400 py-2">No invites yet.</p>
+        )}
+        {invites.map((invite) => (
+          <InviteRow
+            key={invite.id}
+            invite={invite}
+            onRevoke={(id) => revokeMutation.mutate(id)}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ── Main settings page ────────────────────────────────────────────────────────
+
 export function SettingsPage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [saveError, setSaveError] = useState<string | null>(null);
   const [rescheduling, setRescheduling] = useState(false);
   const [rescheduled, setRescheduled] = useState(false);
@@ -256,7 +414,7 @@ export function SettingsPage() {
             <div className="flex items-center justify-between gap-4">
               <span className="text-sm text-gray-600 flex-1">Personal calendar</span>
               <a
-                href="/api/auth/login/personal"
+                href="/api/auth/connect/personal"
                 className="text-xs text-blue-600 hover:underline"
               >
                 Connect personal account
@@ -292,7 +450,7 @@ export function SettingsPage() {
               </span>
             ) : (
               <a
-                href="/api/auth/login/personal"
+                href="/api/auth/connect/personal"
                 className="text-xs text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-full transition-colors"
               >
                 Connect
@@ -325,6 +483,9 @@ export function SettingsPage() {
           </div>
         </div>
       </section>
+
+      {/* Invite management — admin only */}
+      {user?.is_admin && <InviteSection />}
 
       {/* Sign out */}
       <div className="text-center">

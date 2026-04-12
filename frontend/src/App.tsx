@@ -10,6 +10,7 @@ import { ReviewPromptBanner } from './components/ReviewPromptBanner';
 import { WatchdogWidget } from './components/WatchdogWidget';
 import { SettingsPage } from './pages/SettingsPage';
 import { ArchivePage } from './pages/ArchivePage';
+import { InvitePage } from './pages/InvitePage';
 
 // ---- Icons -------------------------------------------------------------------
 
@@ -172,6 +173,12 @@ function AuthenticatedApp() {
 
 export default function App() {
   const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
+
+  // Invite page is accessible before authentication
+  if (location.pathname.startsWith('/invite')) {
+    return <InvitePage />;
+  }
 
   if (isLoading) return <LoadingScreen />;
   if (!isAuthenticated) return <LoginScreen />;

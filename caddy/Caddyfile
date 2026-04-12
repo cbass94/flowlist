@@ -1,26 +1,86 @@
 # FlowList — Caddy reverse proxy
-# In dev: serves both frontend (Vite) and backend (FastAPI) under one host.
-# In prod / tunnel: replace :80 with your domain name and Caddy auto-provisions TLS.
+#
+# Deployment: sits behind Cloudflare Tunnel. Cloudflare handles TLS termination;
+# Caddy listens on HTTP :80 inside Docker.
+#
+# Real IP forwarding: Caddy uses trusted_proxies to trust Cloudflare's IP ranges
+# so that logs and rate limiters see the actual client IP (from X-Forwarded-For),
+# not a Cloudflare datacenter IP.
 
 :80 {
-    # Security headers
+    # ── Trust Cloudflare's IP ranges for real-IP forwarding ──────────────────
+    # Source: https://www.cloudflare.com/ips/
+    # These are the ranges Cloudflare uses to connect to origin servers.
+    # Caddy reads X-Forwarded-For / CF-Connecting-IP only from these trusted IPs.
+    @cloudflare_ipv4 remote_ip \
+        103.21.244.0/22 \
+        103.22.200.0/22 \
+        103.31.4.0/22 \
+        104.16.0.0/13 \
+        104.24.0.0/14 \
+        108.162.192.0/18 \
+        131.0.72.0/22 \
+        141.101.64.0/18 \
+        162.158.0.0/15 \
+        172.64.0.0/13 \
+        173.245.48.0/20 \
+        188.114.96.0/20 \
+        190.93.240.0/20 \
+        197.234.240.0/22 \
+        198.41.128.0/17
+
+    @cloudflare_ipv6 remote_ip \
+        2400:cb00::/32 \
+        2606:4700::/32 \
+        2803:f800::/32 \
+        2405:b500::/32 \
+        2405:8100::/32 \
+        2a06:98c0::/29 \
+        2c0f:f248::/32
+
+    # ── Security headers (applied globally) ──────────────────────────────────
     header {
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        X-XSS-Protection "1; mode=block"
-        Referrer-Policy "strict-origin-when-cross-origin"
-        Permissions-Policy "geolocation=(), camera=(), microphone=()"
+        X-Content-Type-Options             "nosniff"
+        X-Frame-Options                    "DENY"
+        X-XSS-Protection                   "1; mode=block"
+        Referrer-Policy                    "strict-origin-when-cross-origin"
+        Permissions-Policy                 "camera=(), microphone=(), geolocation=()"
+
+        # HSTS — tell browsers to always use HTTPS for this domain.
+        # Cloudflare receives this and forwards it to the browser.
+        Strict-Transport-Security          "max-age=31536000; includeSubDomains"
+
+        # Content Security Policy for a React SPA + Google OAuth.
+        # Notes:
+        #  - 'unsafe-inline' + 'unsafe-eval' required by Vite dev server (HMR).
+        #    Tighten these when switching to a production build with hashed assets.
+        #  - wss: required for Vite HMR websocket.
+        #  - connect-src includes Google OAuth token endpoints (called client-side
+        #    during the redirect flow) and googleapis for Calendar API (server-side
+        #    calls are proxied through the backend, so not strictly needed here).
+        #  - Anthropic API is called server-side only — not in connect-src.
+        Content-Security-Policy            "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com wss:; frame-src https://accounts.google.com; object-src 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com"
+
         # Remove server fingerprinting
         -Server
         -X-Powered-By
     }
 
-    # API requests → FastAPI
-    handle /api/* {
+    # ── Health check — routed to backend (bypasses Cloudflare Access) ────────
+    handle /health {
         reverse_proxy backend:8000
     }
 
-    # WebSocket support for Vite HMR
+    # ── API requests → FastAPI ────────────────────────────────────────────────
+    handle /api/* {
+        reverse_proxy backend:8000 {
+            # Forward real client IP to the backend
+            header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+            header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+        }
+    }
+
+    # ── WebSocket support for Vite HMR ───────────────────────────────────────
     @websocket {
         header Connection *Upgrade*
         header Upgrade websocket
@@ -29,17 +89,17 @@
         reverse_proxy frontend:5173
     }
 
-    # Everything else → Vite dev server.
+    # ── Everything else → Vite dev server ────────────────────────────────────
     # Vite's SPA mode (appType: "spa") returns index.html for all non-asset
-    # paths, which is required for react-router-dom client-side routing to work
-    # on direct navigation (e.g. loading /settings directly in the browser).
+    # paths — required for react-router-dom to work on direct navigation.
     handle {
         reverse_proxy frontend:5173
     }
 
     encode gzip
+
     log {
         output stdout
-        level INFO
+        level  INFO
     }
 }

@@ -183,3 +183,25 @@ Each task has:
 - next_scheduled_start added to TaskRead schema (batch query, no N+1)
 - get_optional_user() returns None instead of 401 for optional auth checks
 - All routers registered in main.py with global HTTPException handler
+- Domain: taskflowlist.com (registered on Cloudflare)
+- Internet exposure: Cloudflare Tunnel (not ngrok)
+- Auth hardening: Cloudflare Access (email whitelist) as outer layer + 
+  Google OAuth as inner layer
+- Registration: invite-only (admin generates invite codes/links)
+- Multi-user: designed for 2-5 trusted users before cloud migration
+- Priority labels: removed — backlog order is the only priority signal
+- robots.txt: Disallow all crawlers (private app)
+- Mixpanel: planned for Prompt 11 — instrument all sensible user actions
+  (deferred, not forgotten)
+- Rate limiting: shared rate_limit.py service using existing Redis pool;
+  auth login/connect = 10 req/min per IP; invites = 5 req/min per IP
+- Request logging middleware: logs method, path, status, ms, IP, user_id;
+  skips /api/auth/me, /health, /api/healthz
+- Invite system: invites table, admin-only CRUD at /api/invites, gate in
+  callback_work (first user exempt), friendly HTML error for uninvited
+- Admin = user_id 1; UserRead.is_admin computed_field; frontend checks user.is_admin
+- Health endpoint: GET /health (Cloudflare/Docker) + GET /api/healthz (existing)
+- GET /api/auth/logout added (navigation link) alongside POST (API callers)
+- Cloudflare Tunnel: cloudflared container in docker-compose using token from env
+- Caddy: trusted_proxies for Cloudflare IPs; HSTS; CSP; forwards CF-Connecting-IP
+- security.txt at /security.txt (served from frontend/public/)
