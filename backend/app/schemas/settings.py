@@ -1,0 +1,36 @@
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+
+class CalendarItem(BaseModel):
+    id: str
+    summary: str
+    primary: bool = False
+
+
+class UserSettings(BaseModel):
+    timezone: str
+    display_name: Optional[str]
+    personal_account_connected: bool
+    # Scheduling preferences
+    work_start_hour: int
+    work_end_hour: int
+    hard_start_hour: int
+    hard_end_hour: int
+    buffer_minutes: int
+    # Calendar IDs (None = using app default from env)
+    work_calendar_id: Optional[str]
+    personal_calendar_id: Optional[str]
+
+
+class UpdateSettings(BaseModel):
+    timezone: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    work_start_hour: Optional[int] = Field(default=None, ge=0, le=23)
+    work_end_hour: Optional[int] = Field(default=None, ge=0, le=23)
+    hard_start_hour: Optional[int] = Field(default=None, ge=0, le=23)
+    hard_end_hour: Optional[int] = Field(default=None, ge=0, le=23)
+    buffer_minutes: Optional[int] = Field(default=None, ge=0, le=120)
+    work_calendar_id: Optional[str] = Field(default=None, max_length=255)
+    personal_calendar_id: Optional[str] = Field(default=None, max_length=255)

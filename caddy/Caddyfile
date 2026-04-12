@@ -1,0 +1,45 @@
+# FlowList — Caddy reverse proxy
+# In dev: serves both frontend (Vite) and backend (FastAPI) under one host.
+# In prod / tunnel: replace :80 with your domain name and Caddy auto-provisions TLS.
+
+:80 {
+    # Security headers
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), camera=(), microphone=()"
+        # Remove server fingerprinting
+        -Server
+        -X-Powered-By
+    }
+
+    # API requests → FastAPI
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+
+    # WebSocket support for Vite HMR
+    @websocket {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    handle @websocket {
+        reverse_proxy frontend:5173
+    }
+
+    # Everything else → Vite dev server.
+    # Vite's SPA mode (appType: "spa") returns index.html for all non-asset
+    # paths, which is required for react-router-dom client-side routing to work
+    # on direct navigation (e.g. loading /settings directly in the browser).
+    handle {
+        reverse_proxy frontend:5173
+    }
+
+    encode gzip
+    log {
+        output stdout
+        level INFO
+    }
+}

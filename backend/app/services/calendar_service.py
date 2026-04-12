@@ -1,0 +1,447 @@
+"""
+Google Calendar service.
+
+All Google API calls are synchronous (the google-api-python-client library
+does not support asyncio). Each call is run via asyncio.to_thread() so it
+does not block the event loop.
+
+Key invariants enforced here:
+  - The app ONLY deletes/modifies events whose google_event_id exists in the
+    calendar_blocks table (i.e. events FlowList created).
+  - All created events are stamped with a [FlowList] description prefix and
+    an extendedProperties.private tag so they can be reliably identified.
+  - Token refresh is automatic: if an access token is expired, we refresh and
+    persist the new token before making the Google API call.
+"""
+
+import asyncio
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Literal
+
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.models.calendar_block import CalendarBlock
+from app.models.task import Task, TaskType
+from app.models.user import User
+from app.repositories import calendar_block_repo, user_repo
+from app.services import crypto
+from app.services import oauth as oauth_service
+from app.services.slot_finder import (
+    SlotFinderConfig,
+    find_free_slots,
+    merge_intervals,
+)
+
+# Tag embedded in every FlowList-created event
+FLOWLIST_TAG = "[FlowList]"
+
+AccountType = Literal["work", "personal"]
+
+
+# ── Credential management ─────────────────────────────────────────────────────
+
+
+async def _get_valid_credentials(
+    user: User,
+    account: AccountType,
+    db: AsyncSession,
+) -> Credentials:
+    """
+    Return a valid Google Credentials object for the given account, refreshing
+    the access token if it has expired or is within 5 minutes of expiry.
+    Persists refreshed tokens back to the DB.
+    """
+    if account == "work":
+        raw_access = user.work_access_token
+        raw_refresh = user.work_refresh_token
+        expiry = user.work_token_expiry
+        client_id = settings.google_work_client_id
+        client_secret = settings.google_work_client_secret
+    else:
+        if not user.personal_google_id:
+            raise ValueError("Personal Google account is not connected")
+        raw_access = user.personal_access_token
+        raw_refresh = user.personal_refresh_token
+        expiry = user.personal_token_expiry
+        client_id = settings.google_personal_client_id
+        client_secret = settings.google_personal_client_secret
+
+    if not raw_access or not raw_refresh:
+        raise ValueError(f"{account} account tokens are missing — user must re-authenticate")
+
+    access_token = crypto.decrypt(raw_access)
+    refresh_token = crypto.decrypt(raw_refresh)
+
+    creds = Credentials(
+        token=access_token,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_id,
+        client_secret=client_secret,
+    )
+    if expiry:
+        creds.expiry = expiry.replace(tzinfo=None)  # google-auth expects naive UTC
+
+    # Refresh if expired or expiring within 5 minutes
+    needs_refresh = (
+        creds.expired
+        or expiry is None
+        or expiry <= datetime.now(tz=timezone.utc) + timedelta(minutes=5)
+    )
+    if needs_refresh:
+        new_access, new_expiry = await oauth_service.refresh_access_token(
+            account, refresh_token
+        )
+        creds = Credentials(
+            token=new_access,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+        # Persist new token
+        async with db.begin_nested():
+            if account == "work":
+                await user_repo.update_work_token(db, user.id, crypto.encrypt(new_access), new_expiry)
+            else:
+                await user_repo.update_personal_token(db, user.id, crypto.encrypt(new_access), new_expiry)
+
+    return creds
+
+
+def _build_service(credentials: Credentials):
+    """Build a Google Calendar API service. Synchronous — call via asyncio.to_thread."""
+    return build("calendar", "v3", credentials=credentials, cache_discovery=False)
+
+
+# ── Event helpers ─────────────────────────────────────────────────────────────
+
+
+def _build_event_body(task: Task, start_dt: datetime, end_dt: datetime) -> dict[str, Any]:
+    """Build the Google Calendar event resource dict for a FlowList task block."""
+    description_parts = [FLOWLIST_TAG]
+    if task.notes:
+        description_parts.append(task.notes)
+    description = "\n\n".join(description_parts)
+
+    return {
+        "summary": task.title,
+        "description": description,
+        "start": {"dateTime": start_dt.isoformat(), "timeZone": "UTC"},
+        "end": {"dateTime": end_dt.isoformat(), "timeZone": "UTC"},
+        # Machine-readable identifier so we can find our events robustly
+        "extendedProperties": {
+            "private": {
+                "flowlist": "true",
+                "task_id": str(task.id),
+            }
+        },
+        "source": {
+            "title": "FlowList",
+            "url": settings.app_base_url,
+        },
+    }
+
+
+def _parse_event(event: dict) -> dict[str, Any]:
+    """Normalize a Google Calendar event dict to a consistent shape."""
+    start_raw = event.get("start", {})
+    end_raw = event.get("end", {})
+    start_str = start_raw.get("dateTime") or start_raw.get("date", "")
+    end_str = end_raw.get("dateTime") or end_raw.get("date", "")
+
+    return {
+        "id": event.get("id"),
+        "summary": event.get("summary", ""),
+        "description": event.get("description", ""),
+        "start": start_str,
+        "end": end_str,
+        "is_flowlist": event.get("extendedProperties", {})
+            .get("private", {})
+            .get("flowlist") == "true"
+            or FLOWLIST_TAG in event.get("description", ""),
+        "task_id": event.get("extendedProperties", {})
+            .get("private", {})
+            .get("task_id"),
+    }
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+
+async def get_calendar_events(
+    user: User,
+    db: AsyncSession,
+    calendar_id: str,
+    account: AccountType,
+    start_dt: datetime,
+    end_dt: datetime,
+) -> list[dict[str, Any]]:
+    """
+    Fetch all events from a Google Calendar in the given datetime range.
+    Returns a list of normalized event dicts (see _parse_event).
+    """
+    creds = await _get_valid_credentials(user, account, db)
+
+    def _fetch() -> list[dict]:
+        service = _build_service(creds)
+        events = []
+        page_token = None
+        while True:
+            result = (
+                service.events()
+                .list(
+                    calendarId=calendar_id,
+                    timeMin=start_dt.isoformat(),
+                    timeMax=end_dt.isoformat(),
+                    singleEvents=True,
+                    orderBy="startTime",
+                    pageToken=page_token,
+                )
+                .execute()
+            )
+            events.extend(result.get("items", []))
+            page_token = result.get("nextPageToken")
+            if not page_token:
+                break
+        return events
+
+    raw_events = await asyncio.to_thread(_fetch)
+    return [_parse_event(e) for e in raw_events]
+
+
+async def create_calendar_block(
+    user: User,
+    db: AsyncSession,
+    task: Task,
+    calendar_id: str,
+    account: AccountType,
+    start_time: datetime,
+    end_time: datetime,
+) -> CalendarBlock:
+    """
+    Create a Google Calendar event for a task block and record it in the DB.
+
+    The event is stamped with [FlowList] in the description and a private
+    extendedProperty so we can always identify it as ours.
+
+    Returns the CalendarBlock ORM row (not yet committed — caller controls txn).
+    """
+    creds = await _get_valid_credentials(user, account, db)
+    event_body = _build_event_body(task, start_time, end_time)
+
+    def _insert() -> str:
+        service = _build_service(creds)
+        created = service.events().insert(calendarId=calendar_id, body=event_body).execute()
+        return created["id"]
+
+    google_event_id = await asyncio.to_thread(_insert)
+
+    # Record in DB
+    block = await calendar_block_repo.create(
+        db,
+        task_id=task.id,
+        google_event_id=google_event_id,
+        calendar_id=calendar_id,
+        account=account,
+        start_at=start_time,
+        end_at=end_time,
+    )
+    return block
+
+
+async def delete_calendar_block(
+    user: User,
+    db: AsyncSession,
+    calendar_id: str,
+    account: AccountType,
+    google_event_id: str,
+) -> None:
+    """
+    Delete a FlowList-owned calendar event from Google Calendar and
+    soft-delete the corresponding calendar_blocks row.
+
+    Silently ignores 404 (event already deleted from Google Calendar).
+    Raises ValueError if the event_id is not in our calendar_blocks table —
+    we never delete events we didn't create.
+    """
+    block = await calendar_block_repo.get_by_google_event_id(db, google_event_id)
+    if block is None or block.is_deleted:
+        # Nothing to do — either already deleted or not ours
+        return
+
+    creds = await _get_valid_credentials(user, account, db)
+
+    def _delete() -> None:
+        service = _build_service(creds)
+        try:
+            service.events().delete(calendarId=calendar_id, eventId=google_event_id).execute()
+        except HttpError as exc:
+            if exc.resp.status == 404:
+                return  # Already gone from Google — still soft-delete our record
+            raise
+
+    await asyncio.to_thread(_delete)
+    await calendar_block_repo.soft_delete(db, block.id)
+
+
+async def _get_freebusy(
+    user: User,
+    db: AsyncSession,
+    calendar_ids: list[str],
+    account: AccountType,
+    start_dt: datetime,
+    end_dt: datetime,
+) -> list[tuple[datetime, datetime]]:
+    """
+    Call Google's freebusy API and return merged busy intervals for the given calendars.
+    All returned datetimes are UTC-aware.
+    """
+    creds = await _get_valid_credentials(user, account, db)
+
+    def _query() -> dict:
+        service = _build_service(creds)
+        return (
+            service.freebusy()
+            .query(
+                body={
+                    "timeMin": start_dt.isoformat(),
+                    "timeMax": end_dt.isoformat(),
+                    "items": [{"id": cal_id} for cal_id in calendar_ids],
+                }
+            )
+            .execute()
+        )
+
+    result = await asyncio.to_thread(_query)
+    calendars_data = result.get("calendars", {})
+
+    intervals: list[tuple[datetime, datetime]] = []
+    for cal_id in calendar_ids:
+        for period in calendars_data.get(cal_id, {}).get("busy", []):
+            start = datetime.fromisoformat(period["start"].replace("Z", "+00:00"))
+            end = datetime.fromisoformat(period["end"].replace("Z", "+00:00"))
+            intervals.append((start, end))
+
+    return intervals
+
+
+async def find_free_slots_for_task(
+    user: User,
+    db: AsyncSession,
+    task: Task,
+    target_date: date,
+    duration_minutes: int,
+) -> list[tuple[datetime, datetime]]:
+    """
+    Find available slots on `target_date` for a task of `duration_minutes`.
+
+    Checks BOTH calendars simultaneously — a slot must be free on both work
+    AND personal calendars to be considered available.
+
+    Work account has read access to both calendars (per CLAUDE.md), so a single
+    freebusy call covers both. If the personal account is separately connected,
+    we also query it directly and merge the results.
+
+    Returns a list of (start, end) UTC-aware datetimes in chronological order.
+    """
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    raw_tz = user.timezone or "UTC"
+    try:
+        user_tz = ZoneInfo(raw_tz)
+    except (ZoneInfoNotFoundError, KeyError):
+        # Try common short names like "Denver" → "America/Denver"
+        try:
+            user_tz = ZoneInfo(f"America/{raw_tz}")
+        except (ZoneInfoNotFoundError, KeyError):
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "find_free_slots_for_task: unknown timezone %r for user %d, falling back to UTC",
+                raw_tz, user.id,
+            )
+            user_tz = ZoneInfo("UTC")
+
+    # Build datetime range for the target date (full day in user tz, with buffer padding)
+    day_start = datetime(
+        target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=user_tz
+    )
+    day_end = day_start + timedelta(days=1)
+
+    # Always query work account for both calendars (work account has read access to personal)
+    busy_intervals = await _get_freebusy(
+        user, db,
+        calendar_ids=[(user.work_calendar_id or settings.work_calendar_id), (user.personal_calendar_id or settings.personal_calendar_id)],
+        account="work",
+        start_dt=day_start,
+        end_dt=day_end,
+    )
+
+    # If personal account is separately connected, query it too for completeness
+    # (handles edge case where personal account has events work account can't see)
+    if user.personal_account_connected:
+        personal_busy = await _get_freebusy(
+            user, db,
+            calendar_ids=[(user.personal_calendar_id or settings.personal_calendar_id)],
+            account="personal",
+            start_dt=day_start,
+            end_dt=day_end,
+        )
+        busy_intervals.extend(personal_busy)
+
+    # Merge all overlapping intervals from both calendars
+    merged_busy = merge_intervals(busy_intervals)
+
+    config = SlotFinderConfig(
+        work_start_hour=user.work_start_hour,
+        work_end_hour=user.work_end_hour,
+        hard_start_hour=user.hard_start_hour,
+        hard_end_hour=user.hard_end_hour,
+        buffer_minutes=user.buffer_minutes,
+        max_block_minutes=settings.schedule_max_block_minutes,
+        min_block_minutes=settings.schedule_min_block_minutes,
+    )
+
+    task_type = task.type.value  # "work" or "personal"
+
+    return find_free_slots(
+        busy_intervals=merged_busy,
+        target_date=target_date,
+        duration_minutes=duration_minutes,
+        task_type=task_type,
+        user_tz=user_tz,
+        config=config,
+        is_off_hours_allowed=task.is_off_hours_allowed,
+        is_workday_allowed=task.is_workday_allowed,
+    )
+
+
+async def list_user_calendars(
+    user: User,
+    db: AsyncSession,
+    account: AccountType = "work",
+) -> list[dict]:
+    """
+    Return the list of calendars accessible by the given account.
+    Each item: {"id": str, "summary": str, "primary": bool}
+    """
+    creds = await _get_valid_credentials(user, account, db)
+
+    def _list() -> list[dict]:
+        service = _build_service(creds)
+        result = service.calendarList().list().execute()
+        items = result.get("items", [])
+        return [
+            {
+                "id": cal.get("id", ""),
+                "summary": cal.get("summary", cal.get("id", "")),
+                "primary": cal.get("primary", False),
+            }
+            for cal in items
+        ]
+
+    return await asyncio.to_thread(_list)
