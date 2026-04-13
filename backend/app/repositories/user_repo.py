@@ -113,6 +113,8 @@ async def update_settings(
     buffer_minutes: int | None = None,
     work_calendar_id: str | None = None,
     personal_calendar_id: str | None = None,
+    allow_work_on_weekends: bool | None = None,
+    allow_personal_on_weekends: bool | None = None,
 ) -> User | None:
     """Update user profile and scheduling settings. Only updates provided (non-None) fields."""
     user = await get_by_id(session, user_id)
@@ -146,6 +148,10 @@ async def update_settings(
         user.work_calendar_id = work_calendar_id
     if personal_calendar_id is not None:
         user.personal_calendar_id = personal_calendar_id
+    if allow_work_on_weekends is not None:
+        user.allow_work_on_weekends = allow_work_on_weekends
+    if allow_personal_on_weekends is not None:
+        user.allow_personal_on_weekends = allow_personal_on_weekends
     await session.flush()
     return user
 

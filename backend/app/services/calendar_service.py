@@ -15,6 +15,7 @@ Key invariants enforced here:
 """
 
 import asyncio
+import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
@@ -23,6 +24,8 @@ from googleapiclient.errors import HttpError
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from sqlalchemy.ext.asyncio import AsyncSession
+
+log = logging.getLogger(__name__)
 
 from app.config import settings
 from app.models.calendar_block import CalendarBlock
@@ -94,6 +97,7 @@ async def _get_valid_credentials(
         or expiry <= datetime.now(tz=timezone.utc) + timedelta(minutes=5)
     )
     if needs_refresh:
+        log.info("_get_valid_credentials: refreshing %s token for user %d", account, user.id)
         new_access, new_expiry = await oauth_service.refresh_access_token(
             account, refresh_token
         )
@@ -110,6 +114,7 @@ async def _get_valid_credentials(
                 await user_repo.update_work_token(db, user.id, crypto.encrypt(new_access), new_expiry)
             else:
                 await user_repo.update_personal_token(db, user.id, crypto.encrypt(new_access), new_expiry)
+        log.info("_get_valid_credentials: refreshed and persisted %s token for user %d", account, user.id)
 
     return creds
 
@@ -283,10 +288,22 @@ async def delete_calendar_block(
             service.events().delete(calendarId=calendar_id, eventId=google_event_id).execute()
         except HttpError as exc:
             if exc.resp.status == 404:
+                log.info(
+                    "delete_calendar_block: event %s already gone from GCal (404) — soft-deleting DB record",
+                    google_event_id,
+                )
                 return  # Already gone from Google — still soft-delete our record
+            log.warning(
+                "delete_calendar_block: GCal API error deleting event %s on calendar %s: status=%s reason=%s",
+                google_event_id, calendar_id, exc.resp.status, exc.error_details,
+            )
             raise
 
     await asyncio.to_thread(_delete)
+    log.info(
+        "delete_calendar_block: deleted event %s from GCal calendar %s (account=%s)",
+        google_event_id, calendar_id, account,
+    )
     await calendar_block_repo.soft_delete(db, block.id)
 
 
@@ -337,6 +354,7 @@ async def find_free_slots_for_task(
     task: Task,
     target_date: date,
     duration_minutes: int,
+    min_start: datetime | None = None,
 ) -> list[tuple[datetime, datetime]]:
     """
     Find available slots on `target_date` for a task of `duration_minutes`.
@@ -404,6 +422,8 @@ async def find_free_slots_for_task(
         buffer_minutes=user.buffer_minutes,
         max_block_minutes=settings.schedule_max_block_minutes,
         min_block_minutes=settings.schedule_min_block_minutes,
+        allow_work_on_weekends=user.allow_work_on_weekends,
+        allow_personal_on_weekends=user.allow_personal_on_weekends,
     )
 
     task_type = task.type.value  # "work" or "personal"
@@ -417,7 +437,43 @@ async def find_free_slots_for_task(
         config=config,
         is_off_hours_allowed=task.is_off_hours_allowed,
         is_workday_allowed=task.is_workday_allowed,
+        min_start=min_start,
     )
+
+
+async def get_event_by_id(
+    user: User,
+    db: AsyncSession,
+    event_id: str,
+) -> dict[str, Any] | None:
+    """
+    Fetch a single Google Calendar event by ID.
+
+    Tries the work account's work and personal calendars. Returns a normalized
+    event dict (same shape as _parse_event), or None if not found.
+    """
+    work_cal_id = user.work_calendar_id or settings.work_calendar_id
+    personal_cal_id = user.personal_calendar_id or settings.personal_calendar_id
+    calendar_ids_to_try = list(dict.fromkeys([work_cal_id, personal_cal_id]))
+
+    creds = await _get_valid_credentials(user, "work", db)
+
+    def _fetch(cal_id: str) -> dict | None:
+        service = _build_service(creds)
+        try:
+            event = service.events().get(calendarId=cal_id, eventId=event_id).execute()
+            return event
+        except HttpError as exc:
+            if exc.resp.status in (404, 410):
+                return None
+            raise
+
+    for cal_id in calendar_ids_to_try:
+        raw = await asyncio.to_thread(_fetch, cal_id)
+        if raw is not None:
+            return _parse_event(raw)
+
+    return None
 
 
 async def list_user_calendars(

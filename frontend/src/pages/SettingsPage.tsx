@@ -345,6 +345,42 @@ export function SettingsPage() {
           </p>
         </div>
         <div className="px-5 py-4 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <label className="text-sm text-gray-600 flex-1">Schedule work tasks on weekends</label>
+            <button
+              role="switch"
+              aria-checked={settings.allow_work_on_weekends}
+              onClick={() => save({ allow_work_on_weekends: !settings.allow_work_on_weekends })}
+              className={`relative inline-flex w-10 h-5 rounded-full transition-colors ${
+                settings.allow_work_on_weekends ? "bg-blue-600" : "bg-gray-200"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                  settings.allow_work_on_weekends ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <label className="text-sm text-gray-600 flex-1">Schedule personal tasks on weekends</label>
+            <button
+              role="switch"
+              aria-checked={settings.allow_personal_on_weekends}
+              onClick={() => save({ allow_personal_on_weekends: !settings.allow_personal_on_weekends })}
+              className={`relative inline-flex w-10 h-5 rounded-full transition-colors ${
+                settings.allow_personal_on_weekends ? "bg-blue-600" : "bg-gray-200"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                  settings.allow_personal_on_weekends ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+        <div className="px-5 py-4 space-y-3">
           <HourSelect
             label="Work day start"
             value={settings.work_start_hour}

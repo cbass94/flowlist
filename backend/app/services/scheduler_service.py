@@ -314,8 +314,20 @@ async def _assign_slots(
             ("personal" if user.personal_google_id else "work")
         )
 
-        # Scan days until we find a usable slot
-        scan_date = scan_from.date()
+        # Scan days until we find a usable slot.
+        # Use the user's local timezone for the starting date — using UTC here
+        # would skip the current local day for users with negative UTC offsets
+        # (e.g. America/Chicago UTC-5: after 7pm local = next UTC day).
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        try:
+            _scan_tz = ZoneInfo(user.timezone or "UTC")
+        except (ZoneInfoNotFoundError, KeyError):
+            _scan_tz = ZoneInfo("UTC")
+        scan_date = scan_from.astimezone(_scan_tz).date()
+        log.debug(
+            "_assign_slots: task %d scan_from=%s (UTC) → scan_date=%s (local tz=%s)",
+            task.id, scan_from.isoformat(), scan_date, user.timezone,
+        )
         placed = False
 
         for day_offset in range(_MAX_SCAN_DAYS):
@@ -334,7 +346,11 @@ async def _assign_slots(
             if daily_counts[candidate_date][cap_key] >= cap:
                 continue
 
-            # Find free slots for this task on this day
+            # Find free slots for this task on this day.
+            # Pass scan_from as min_start on the first day so the slot finder
+            # advances past already-elapsed times within each gap, rather than
+            # returning an early-morning slot that is already in the past.
+            min_start_for_day = scan_from if candidate_date == scan_date else None
             try:
                 slots = await calendar_service.find_free_slots_for_task(
                     user=user,
@@ -342,6 +358,7 @@ async def _assign_slots(
                     task=task,
                     target_date=candidate_date,
                     duration_minutes=duration_mins,
+                    min_start=min_start_for_day,
                 )
             except Exception as exc:
                 log.warning(
@@ -353,12 +370,7 @@ async def _assign_slots(
             if not slots:
                 continue
 
-            # Use the earliest available slot on this day
             start_time, end_time = slots[0]
-
-            # Skip slots in the past (can happen on the scan_from day)
-            if end_time <= scan_from:
-                continue
 
             # Create the calendar event
             try:

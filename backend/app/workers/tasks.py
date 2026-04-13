@@ -52,6 +52,13 @@ _DEBOUNCE_KEY = "reschedule:token:{user_id}"
 
 async def startup(ctx: dict) -> None:
     """Called once when the worker process starts."""
+    import logging as _logging
+    _logging.basicConfig(
+        level=_logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+        force=True,
+    )
     log.info("FlowList worker starting up")
     # Use the regex-based parser instead of aioredis.from_url(), which uses
     # Python's urlparse and breaks when the password contains '#' (treated

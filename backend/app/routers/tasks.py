@@ -29,7 +29,7 @@ from app.schemas.task import (
     TaskRead,
     TaskUpdate,
 )
-from app.services import ai_service
+from app.services import ai_service, calendar_service
 from app.services.auth_service import get_current_user
 
 log = logging.getLogger(__name__)
@@ -112,9 +112,10 @@ async def create_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[TaskRead]:
-    priority = body.priority
-    if priority is None:
-        priority = await task_repo.get_next_priority(db, current_user.id)
+    # Always insert new tasks at the top of the backlog (priority 1),
+    # shifting all existing active tasks down by 1.
+    await task_repo.insert_at_top(db, current_user.id)
+    priority = 1
 
     task = await task_repo.create(
         db,
@@ -138,7 +139,7 @@ async def create_task(
             task_type=body.type.value,
             task_title_snapshot=body.title,
             estimated_minutes=body.estimated_duration_minutes,
-            model_used=f"{body.ai_confidence or 'unknown'}/{body.ai_suggested_priority or 'unknown'}",
+            model_used=f"confidence:{body.ai_confidence or 'unknown'}",
             keywords=body.ai_keywords,
         )
 
@@ -229,7 +230,27 @@ async def delegate_task(
     task = await task_repo.get_by_id(db, task_id)
     if task is None or task.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Task not found")
-    await calendar_block_repo.soft_delete_by_task(db, task_id)
+
+    # Cancel Google Calendar events for all active blocks (best-effort)
+    active_blocks = await calendar_block_repo.get_active_blocks_for_task(db, task_id)
+    for block in active_blocks:
+        try:
+            await calendar_service.delete_calendar_block(
+                current_user, db,
+                calendar_id=block.calendar_id,
+                account=block.account,  # type: ignore[arg-type]
+                google_event_id=block.google_event_id,
+            )
+        except Exception:
+            # Log the failure but do NOT soft-delete the DB block — if the GCal
+            # deletion failed, the block stays active so the next reschedule can
+            # retry the GCal cancellation. Soft-deleting here would orphan the event.
+            log.warning(
+                "delegate_task: failed to cancel GCal event %s for task %d — "
+                "block left active for retry on next reschedule",
+                block.google_event_id, task_id, exc_info=True,
+            )
+
     task = await task_repo.update_fields(
         db, task_id, status=TaskStatus.delegated, procrastination_flag=False
     )

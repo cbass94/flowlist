@@ -30,6 +30,8 @@ class SlotFinderConfig:
     buffer_minutes: int = 30
     max_block_minutes: int = 120
     min_block_minutes: int = 60
+    allow_work_on_weekends: bool = False
+    allow_personal_on_weekends: bool = True
 
 
 TaskType = Literal["work", "personal"]
@@ -99,7 +101,7 @@ def get_valid_windows(
     min_window = timedelta(minutes=config.min_block_minutes)
 
     if task_type == "work":
-        if _is_weekend(target_date) and not is_off_hours_allowed:
+        if _is_weekend(target_date) and not is_off_hours_allowed and not config.allow_work_on_weekends:
             return []
         if is_off_hours_allowed:
             start = _local(target_date, config.hard_start_hour, 0, user_tz)
@@ -110,6 +112,9 @@ def get_valid_windows(
         return [(start, end)] if end - start >= min_window else []
 
     # personal
+    if _is_weekend(target_date) and not config.allow_personal_on_weekends and not is_workday_allowed:
+        return []
+
     hard_start = _local(target_date, config.hard_start_hour, 0, user_tz)
     hard_end = _local(target_date, config.hard_end_hour, 0, user_tz)
 
@@ -144,6 +149,7 @@ def find_free_slots(
     config: SlotFinderConfig,
     is_off_hours_allowed: bool = False,
     is_workday_allowed: bool = False,
+    min_start: datetime | None = None,
 ) -> list[Interval]:
     """
     Return all (start, end) slots on `target_date` where a block of
@@ -157,6 +163,11 @@ def find_free_slots(
     The buffer rule: 30 min of clear calendar time REQUIRED before each
     auto-block. No buffer is required at the very start of a window when
     there is no preceding event within the buffer window.
+
+    `min_start`: if given, no slot may begin before this datetime. Used by
+    the scheduler to skip past-times on the current day without skipping
+    the entire day — e.g. if now is 8pm and the only gap starts at 3pm,
+    the slot is advanced to 8pm (if the gap still fits).
 
     Returns slots in chronological order. An empty list means the day is
     fully packed (or no windows exist, e.g. Saturday work task).
@@ -185,6 +196,14 @@ def find_free_slots(
                 if required > cursor:
                     cursor = required
             # Events ending after win_start are handled in the main loop below
+
+        # Advance cursor to min_start if we're running the scheduler in real
+        # time — this prevents returning stale slots from earlier in the day.
+        if min_start is not None and min_start > cursor:
+            cursor = min_start
+
+        if cursor >= win_end:
+            continue  # min_start is past the entire window
 
         # Walk through busy intervals, finding free gaps in the window
         for bs, be in busy:

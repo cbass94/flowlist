@@ -34,6 +34,8 @@ def _user_to_settings(user: User) -> UserSettings:
         buffer_minutes=user.buffer_minutes,
         work_calendar_id=user.work_calendar_id,
         personal_calendar_id=user.personal_calendar_id,
+        allow_work_on_weekends=user.allow_work_on_weekends,
+        allow_personal_on_weekends=user.allow_personal_on_weekends,
     )
 
 

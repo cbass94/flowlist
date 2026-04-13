@@ -65,11 +65,6 @@ _TASK_PARSE_TOOL: dict = {
                 "type": "string",
                 "enum": ["work", "personal"],
             },
-            "suggested_priority": {
-                "type": "string",
-                "enum": ["top", "high", "medium", "low"],
-                "description": "Relative priority suggestion.",
-            },
             "estimated_duration_minutes": {
                 "type": "integer",
                 "minimum": 15,
@@ -102,7 +97,6 @@ _TASK_PARSE_TOOL: dict = {
         "required": [
             "title",
             "type",
-            "suggested_priority",
             "estimated_duration_minutes",
             "reasoning",
             "confidence",
@@ -117,7 +111,6 @@ _TASK_PARSE_TOOL: dict = {
 class AISuggestion(BaseModel):
     title: str
     type: Literal["work", "personal"]
-    suggested_priority: Literal["top", "high", "medium", "low"]
     estimated_duration_minutes: int = Field(ge=15, le=480)
     reasoning: str
     optional_deadline_detected: date | None = None
@@ -251,7 +244,6 @@ def _parse_claude_output(tool_input: dict) -> AISuggestion:
     return AISuggestion(
         title=str(tool_input.get("title", "")).strip()[:512] or "New Task",
         type=tool_input.get("type", "work"),
-        suggested_priority=tool_input.get("suggested_priority", "medium"),
         estimated_duration_minutes=duration,
         reasoning=str(tool_input.get("reasoning", "")).strip(),
         optional_deadline_detected=deadline,
@@ -269,7 +261,6 @@ def _build_fallback(raw_text: str) -> ParseResponse:
         suggestion=AISuggestion(
             title=raw_text.strip()[:512] or "New Task",
             type="work",
-            suggested_priority="medium",
             estimated_duration_minutes=60,
             reasoning="AI is temporarily unavailable. Please fill in the details below.",
             optional_deadline_detected=None,

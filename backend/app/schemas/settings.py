@@ -22,6 +22,9 @@ class UserSettings(BaseModel):
     # Calendar IDs (None = using app default from env)
     work_calendar_id: Optional[str]
     personal_calendar_id: Optional[str]
+    # Weekend scheduling
+    allow_work_on_weekends: bool = False
+    allow_personal_on_weekends: bool = True
 
 
 class UpdateSettings(BaseModel):
@@ -34,3 +37,5 @@ class UpdateSettings(BaseModel):
     buffer_minutes: Optional[int] = Field(default=None, ge=0, le=120)
     work_calendar_id: Optional[str] = Field(default=None, max_length=255)
     personal_calendar_id: Optional[str] = Field(default=None, max_length=255)
+    allow_work_on_weekends: Optional[bool] = None
+    allow_personal_on_weekends: Optional[bool] = None

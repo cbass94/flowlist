@@ -11,6 +11,8 @@ export interface UpdateSettings {
   buffer_minutes?: number;
   work_calendar_id?: string;
   personal_calendar_id?: string;
+  allow_work_on_weekends?: boolean;
+  allow_personal_on_weekends?: boolean;
 }
 
 export const settingsApi = {

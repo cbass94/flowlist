@@ -9,7 +9,6 @@ export type TaskStatus =
   | "done"
   | "delegated";
 
-export type PriorityLevel = "top" | "high" | "medium" | "low";
 export type ConfidenceLevel = "high" | "medium" | "low";
 
 export interface Task {
@@ -32,12 +31,15 @@ export interface Task {
   completed_at: string | null;
   updated_at: string;
   notes: string | null;
+  // Linked Google Calendar event (manually associated)
+  linked_calendar_event_id: string | null;
+  linked_calendar_event_title: string | null;
+  linked_calendar_event_start: string | null;
 }
 
 export interface AISuggestion {
   title: string;
   type: TaskType;
-  suggested_priority: PriorityLevel;
   estimated_duration_minutes: number;
   reasoning: string;
   optional_deadline_detected: string | null;  // ISO date YYYY-MM-DD or null
@@ -66,7 +68,6 @@ export interface TaskCreate {
   is_workday_allowed?: boolean;
   notes?: string;
   part_of_task_id?: number;
-  ai_suggested_priority?: PriorityLevel;
   ai_confidence?: ConfidenceLevel;
   ai_keywords?: string[];
 }
@@ -83,6 +84,9 @@ export interface TaskUpdate {
   is_workday_allowed?: boolean;
   notes?: string;
   procrastination_flag?: boolean;
+  linked_calendar_event_id?: string | null;
+  linked_calendar_event_title?: string | null;
+  linked_calendar_event_start?: string | null;
 }
 
 export interface ReorderRequest {
@@ -117,12 +121,22 @@ export interface UserSettings {
   buffer_minutes: number;
   work_calendar_id: string | null;
   personal_calendar_id: string | null;
+  allow_work_on_weekends: boolean;
+  allow_personal_on_weekends: boolean;
 }
 
 export interface CalendarItem {
   id: string;
   summary: string;
   primary: boolean;
+}
+
+export interface CalendarEvent {
+  id: string;
+  summary: string;
+  start: string;
+  end: string;
+  is_flowlist: boolean;
 }
 
 export type InviteStatus = "pending" | "accepted" | "expired";

@@ -226,6 +226,21 @@ async def get_next_priority(session: AsyncSession, user_id: int) -> int:
     return (max_priority or 0) + 1
 
 
+async def insert_at_top(session: AsyncSession, user_id: int) -> None:
+    """
+    Shift all active (non-terminal) tasks' priorities up by 1 to make room
+    for a new task at priority 1.
+    """
+    await session.execute(
+        update(Task)
+        .where(
+            Task.user_id == user_id,
+            Task.status.notin_([TaskStatus.done, TaskStatus.delegated]),
+        )
+        .values(priority=Task.priority + 1)
+    )
+
+
 async def get_archive(
     session: AsyncSession,
     user_id: int,

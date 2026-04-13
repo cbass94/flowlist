@@ -42,7 +42,6 @@ class TaskCreate(BaseModel):
     notes: Optional[str] = None
     part_of_task_id: Optional[int] = None
     # AI suggestion metadata logged alongside the task
-    ai_suggested_priority: Optional[Literal["top", "high", "medium", "low"]] = None
     ai_confidence: Optional[Literal["high", "medium", "low"]] = None
     ai_keywords: Optional[List[str]] = None
 
@@ -60,6 +59,10 @@ class TaskUpdate(BaseModel):
     is_workday_allowed: Optional[bool] = None
     notes: Optional[str] = None
     procrastination_flag: Optional[bool] = None
+    # Linked Google Calendar event (manually associated by user)
+    linked_calendar_event_id: Optional[str] = None
+    linked_calendar_event_title: Optional[str] = None
+    linked_calendar_event_start: Optional[str] = None
 
 
 class TaskRead(BaseModel):
@@ -84,6 +87,10 @@ class TaskRead(BaseModel):
     # Computed from calendar_blocks (populated by router, not ORM)
     scheduled_blocks: List[str] = Field(default_factory=list)
     next_scheduled_start: Optional[datetime] = None
+    # Linked Google Calendar event (manually associated by user)
+    linked_calendar_event_id: Optional[str] = None
+    linked_calendar_event_title: Optional[str] = None
+    linked_calendar_event_start: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

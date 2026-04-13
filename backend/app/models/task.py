@@ -83,6 +83,11 @@ class Task(Base):
 
     notes = Column(Text, nullable=True)
 
+    # Manually linked Google Calendar event (not auto-scheduled; user-associated)
+    linked_calendar_event_id = Column(String(255), nullable=True)
+    linked_calendar_event_title = Column(String(512), nullable=True)
+    linked_calendar_event_start = Column(String(64), nullable=True)  # ISO datetime string
+
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

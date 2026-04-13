@@ -16,12 +16,6 @@ Be concise, practical, and realistic — this person has a fluid, non-traditiona
 - Work: anything related to the company, investors, team, product, customers, revenue, ops, legal, finance
 - Personal: health, family, home, errands, hobbies, personal finances, travel planning
 
-**Priority guidelines:**
-- top: urgent/time-sensitive OR blocks other people/work OR has a hard deadline within 3 days
-- high: important, should happen this week, meaningful impact if delayed
-- medium: should happen within 2 weeks, moderate consequence if delayed
-- low: nice-to-do, minimal near-term consequence, can wait a month
-
 **Duration guidelines:**
 - Email/quick reply: 15–30 min
 - Single focused document (deck, brief, memo): 60–90 min

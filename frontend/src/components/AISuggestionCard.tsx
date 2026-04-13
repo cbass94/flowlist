@@ -15,7 +15,6 @@ import clsx from "clsx";
 import type {
   AISuggestion,
   ConfidenceLevel,
-  PriorityLevel,
   TaskCreate,
   TaskType,
 } from "../types";
@@ -70,16 +69,6 @@ function Toggle({
   );
 }
 
-const PRIORITY_OPTIONS: {
-  value: PriorityLevel;
-  label: string;
-}[] = [
-  { value: "top", label: "Top priority" },
-  { value: "high", label: "High" },
-  { value: "medium", label: "Medium" },
-  { value: "low", label: "Low" },
-];
-
 const CONFIDENCE_STYLE: Record<ConfidenceLevel, string> = {
   high: "bg-emerald-50 text-emerald-700 border-emerald-200",
   medium: "bg-yellow-50 text-yellow-700 border-yellow-200",
@@ -91,7 +80,6 @@ const CONFIDENCE_STYLE: Record<ConfidenceLevel, string> = {
 interface EditState {
   title: string;
   type: TaskType;
-  suggested_priority: PriorityLevel;
   estimated_duration_minutes: number;
   reasoning: string;
   confidence: ConfidenceLevel;
@@ -107,7 +95,6 @@ function initEditState(raw: string, suggestion?: AISuggestion): EditState {
   return {
     title: suggestion?.title ?? raw,
     type: suggestion?.type ?? "work",
-    suggested_priority: suggestion?.suggested_priority ?? "medium",
     estimated_duration_minutes: suggestion?.estimated_duration_minutes ?? 60,
     reasoning: suggestion?.reasoning ?? "",
     confidence: suggestion?.confidence ?? "low",
@@ -174,7 +161,6 @@ export function AISuggestionCard({
       optional_deadline: state.deadline || undefined,
       is_off_hours_allowed: state.is_off_hours_allowed,
       is_workday_allowed: state.is_workday_allowed,
-      ai_suggested_priority: state.suggested_priority,
       ai_confidence: state.confidence,
       ai_keywords: state.keywords,
     };
@@ -237,54 +223,29 @@ export function AISuggestionCard({
           />
         </div>
 
-        {/* Type + Priority */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label>Type</Label>
-            {isLoading ? (
-              <Skeleton className="h-9 w-full" />
-            ) : (
-              <div className="flex rounded-lg border border-gray-200 overflow-hidden">
-                {(["work", "personal"] as TaskType[]).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => set("type", t)}
-                    className={clsx(
-                      "flex-1 py-2 text-xs font-medium capitalize transition-colors",
-                      state.type === t
-                        ? "bg-blue-600 text-white"
-                        : "bg-white text-gray-600 hover:bg-gray-50"
-                    )}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <Label>Priority</Label>
-            {isLoading ? (
-              <Skeleton className="h-9 w-full" />
-            ) : (
-              <select
-                value={state.suggested_priority}
-                onChange={(e) =>
-                  set("suggested_priority", e.target.value as PriorityLevel)
-                }
-                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2
-                           text-xs focus:border-blue-400 focus:outline-none focus:ring-2
-                           focus:ring-blue-100 transition-colors"
-              >
-                {PRIORITY_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
+        {/* Type */}
+        <div>
+          <Label>Type</Label>
+          {isLoading ? (
+            <Skeleton className="h-9 w-full" />
+          ) : (
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+              {(["work", "personal"] as TaskType[]).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => set("type", t)}
+                  className={clsx(
+                    "flex-1 py-2 text-xs font-medium capitalize transition-colors",
+                    state.type === t
+                      ? "bg-blue-600 text-white"
+                      : "bg-white text-gray-600 hover:bg-gray-50"
+                  )}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* AI estimate + reasoning */}
