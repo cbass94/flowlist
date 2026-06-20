@@ -29,3 +29,7 @@ Thumbs.db
 .idea/
 *.iml
 Creds.txt
+
+# Claude Code — local, per-machine settings (permissions etc.); the shared
+# .claude/settings.json (if added) stays tracked.
+.claude/settings.local.json
