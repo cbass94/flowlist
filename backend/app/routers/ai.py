@@ -20,6 +20,8 @@ from app.models.user import User
 from app.repositories import ai_log_repo, task_repo
 from app.schemas.envelope import ApiResponse, ok
 from app.schemas.task import ParseRequest, ParseResponse
+from app.repositories import ai_feedback_repo
+from app.services.ai_service import AssistantRequest, AssistantResponse, FeedbackRequest
 from app.services import ai_service
 from app.services.auth_service import get_current_user
 
@@ -95,3 +97,74 @@ async def parse_task(
         backlog_preview=backlog_preview,
     )
     return ok(result)
+
+
+@router.post(
+    "/task-assistant",
+    response_model=ApiResponse[AssistantResponse],
+    summary="Get AI assistance suggestions for a task",
+)
+async def task_assistant(
+    body: AssistantRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[AssistantResponse]:
+    """
+    Analyse a task and suggest tools, approaches, and workflows to complete it
+    efficiently. Considers all task metadata including type, duration, deadline,
+    scheduling constraints, and calendar context.
+    """
+    await _check_rate_limit(current_user.id)
+
+    active_tasks = await task_repo.get_all_by_priority(
+        db, current_user.id, exclude_statuses=_TERMINAL_STATUSES
+    )
+    backlog_preview = [t.title for t in active_tasks[:5]]
+
+    feedback_history = await ai_feedback_repo.get_recent(db, current_user.id, limit=10)
+
+    result = await ai_service.get_task_assistance(
+        request=body,
+        backlog_preview=backlog_preview,
+        feedback_history=feedback_history,
+    )
+
+    if body.task_id and result.ai_available:
+        from datetime import datetime, timezone as tz
+        cache_data = result.model_dump(exclude={"ai_available"})
+        await task_repo.update_fields(
+            db, body.task_id,
+            ai_assistant_cache=cache_data,
+            ai_assistant_cached_at=datetime.now(tz=tz.utc),
+        )
+
+    return ok(result)
+
+
+@router.post(
+    "/assistant-feedback",
+    response_model=ApiResponse[None],
+    status_code=201,
+    summary="Submit feedback on AI Assistant suggestions",
+)
+async def submit_assistant_feedback(
+    body: FeedbackRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[None]:
+    """
+    Record thumbs-up/thumbs-down feedback with optional comment.
+    Fed back into future AI Assistant prompts for preference learning.
+    """
+    await ai_feedback_repo.create(
+        db,
+        user_id=current_user.id,
+        task_id=body.task_id,
+        task_title_snapshot=body.task_title,
+        task_type=body.task_type,
+        is_positive=body.is_positive,
+        comment=body.comment or None,
+        ai_summary_snapshot=body.ai_summary,
+        ai_suggestions_snapshot=body.ai_suggestions,
+    )
+    return ok(None)
