@@ -29,7 +29,7 @@ function AccuracyBadge({
 
   return (
     <div className="text-right">
-      <p className="text-sm font-medium text-gray-700">{formatDuration(actual)}</p>
+      <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{formatDuration(actual)}</p>
       <p
         className={clsx(
           "text-xs",
@@ -51,13 +51,13 @@ function TaskArchiveRow({ task }: { task: Task }) {
   const isDone = task.status === "done";
   const statusLabel = isDone ? "Done" : "Delegated";
   const statusColor = isDone
-    ? "text-green-700 bg-green-50"
-    : "text-purple-700 bg-purple-50";
+    ? "text-green-700 dark:text-green-300 bg-green-50 dark:bg-green-950"
+    : "text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950";
 
   const typeColor =
     task.type === "work"
-      ? "text-blue-600 bg-blue-50"
-      : "text-teal-600 bg-teal-50";
+      ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950"
+      : "text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950";
 
   const completedAt = task.completed_at
     ? formatDistanceToNow(parseISO(task.completed_at), { addSuffix: true })
@@ -73,7 +73,7 @@ function TaskArchiveRow({ task }: { task: Task }) {
     <div
       className={clsx(
         "transition-colors",
-        expanded ? "bg-gray-50/50" : "hover:bg-gray-50"
+        expanded ? "bg-gray-50/50 dark:bg-gray-800/50" : "hover:bg-gray-50 dark:hover:bg-gray-800/30"
       )}
     >
       {/* Compact row — click to expand */}
@@ -83,7 +83,7 @@ function TaskArchiveRow({ task }: { task: Task }) {
       >
         <div className="flex items-start gap-3">
           <div className="flex-1 min-w-0">
-            <p className="text-sm text-gray-800 font-medium">{task.title}</p>
+            <p className="text-sm text-gray-800 dark:text-gray-100 font-medium">{task.title}</p>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span className={`text-xs px-1.5 py-0.5 rounded-md font-medium ${typeColor}`}>
                 {task.type}
@@ -92,7 +92,7 @@ function TaskArchiveRow({ task }: { task: Task }) {
                 {statusLabel}
               </span>
               {completedAt && (
-                <span className="text-xs text-gray-400">{completedAt}</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">{completedAt}</span>
               )}
             </div>
           </div>
@@ -103,17 +103,17 @@ function TaskArchiveRow({ task }: { task: Task }) {
                 actual={task.actual_duration_minutes}
               />
             ) : task.actual_duration_minutes != null ? (
-              <p className="text-sm font-medium text-gray-700">
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
                 {formatDuration(task.actual_duration_minutes)}
               </p>
             ) : task.estimated_duration_minutes != null ? (
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-gray-400 dark:text-gray-500">
                 est {formatDuration(task.estimated_duration_minutes)}
               </p>
             ) : null}
             <svg
               className={clsx(
-                "w-4 h-4 text-gray-300 shrink-0 mt-0.5 transition-transform",
+                "w-4 h-4 text-gray-300 dark:text-gray-600 shrink-0 mt-0.5 transition-transform",
                 expanded && "rotate-180"
               )}
               viewBox="0 0 16 16"
@@ -134,39 +134,39 @@ function TaskArchiveRow({ task }: { task: Task }) {
 
       {/* Expanded detail */}
       {expanded && (
-        <div className="px-4 pb-4 border-t border-gray-100">
+        <div className="px-4 pb-4 border-t border-gray-100 dark:border-gray-800">
           <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs mt-3">
             {completedAtFull && (
               <>
-                <dt className="text-gray-400">{isDone ? "Completed" : "Delegated"}</dt>
-                <dd className="text-gray-700">{completedAtFull}</dd>
+                <dt className="text-gray-400 dark:text-gray-500">{isDone ? "Completed" : "Delegated"}</dt>
+                <dd className="text-gray-700 dark:text-gray-200">{completedAtFull}</dd>
               </>
             )}
             {task.optional_deadline && (
               <>
-                <dt className="text-gray-400">Deadline</dt>
-                <dd className="text-gray-700">{task.optional_deadline}</dd>
+                <dt className="text-gray-400 dark:text-gray-500">Deadline</dt>
+                <dd className="text-gray-700 dark:text-gray-200">{task.optional_deadline}</dd>
               </>
             )}
             {task.estimated_duration_minutes != null && (
               <>
-                <dt className="text-gray-400">Estimated</dt>
-                <dd className="text-gray-700">{formatDuration(task.estimated_duration_minutes)}</dd>
+                <dt className="text-gray-400 dark:text-gray-500">Estimated</dt>
+                <dd className="text-gray-700 dark:text-gray-200">{formatDuration(task.estimated_duration_minutes)}</dd>
               </>
             )}
             {task.actual_duration_minutes != null && (
               <>
-                <dt className="text-gray-400">Actual</dt>
+                <dt className="text-gray-400 dark:text-gray-500">Actual</dt>
                 <dd
                   className={clsx(
                     "font-medium",
                     task.estimated_duration_minutes
                       ? Math.abs(task.actual_duration_minutes - task.estimated_duration_minutes) <= 15
-                        ? "text-green-600"
+                        ? "text-green-600 dark:text-green-400"
                         : task.actual_duration_minutes > task.estimated_duration_minutes
                         ? "text-orange-500"
-                        : "text-blue-500"
-                      : "text-gray-700"
+                        : "text-blue-500 dark:text-blue-400"
+                      : "text-gray-700 dark:text-gray-200"
                   )}
                 >
                   {formatDuration(task.actual_duration_minutes)}
@@ -175,27 +175,27 @@ function TaskArchiveRow({ task }: { task: Task }) {
             )}
             {task.part_of_task_id && (
               <>
-                <dt className="text-gray-400">Part of</dt>
-                <dd className="text-gray-700">Task #{task.part_of_task_id}</dd>
+                <dt className="text-gray-400 dark:text-gray-500">Part of</dt>
+                <dd className="text-gray-700 dark:text-gray-200">Task #{task.part_of_task_id}</dd>
               </>
             )}
             {task.linked_calendar_event_title && (
               <>
-                <dt className="text-gray-400">Linked event</dt>
-                <dd className="text-gray-700 truncate">{task.linked_calendar_event_title}</dd>
+                <dt className="text-gray-400 dark:text-gray-500">Linked event</dt>
+                <dd className="text-gray-700 dark:text-gray-200 truncate">{task.linked_calendar_event_title}</dd>
               </>
             )}
           </dl>
-          {task.notes && (
-            <p className="mt-2 text-xs text-gray-600 whitespace-pre-wrap border-t border-gray-100 pt-2">
-              {task.notes}
+          {task.description && (
+            <p className="mt-2 text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap border-t border-gray-100 dark:border-gray-800 pt-2">
+              {task.description}
             </p>
           )}
           {task.estimated_duration_minutes && task.actual_duration_minutes && (
-            <div className="mt-3 border-t border-gray-100 pt-2">
-              <p className="text-xs font-medium text-gray-500 mb-1">Estimation accuracy</p>
+            <div className="mt-3 border-t border-gray-100 dark:border-gray-800 pt-2">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Estimation accuracy</p>
               <div className="flex items-center gap-2">
-                <div className="flex-1 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                <div className="flex-1 h-1.5 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
                   <div
                     className={clsx(
                       "h-full rounded-full transition-all",
@@ -220,7 +220,7 @@ function TaskArchiveRow({ task }: { task: Task }) {
                     }}
                   />
                 </div>
-                <span className="text-xs text-gray-400 shrink-0">
+                <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">
                   {Math.abs(task.actual_duration_minutes - task.estimated_duration_minutes) <= 15
                     ? "On target"
                     : task.actual_duration_minutes > task.estimated_duration_minutes
@@ -253,7 +253,7 @@ export function ArchivePage() {
   return (
     <div className="space-y-5 pb-16">
       {/* Filter tabs */}
-      <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 self-start">
+      <div className="flex items-center gap-0.5 bg-gray-100/80 dark:bg-gray-800/80 rounded-lg p-0.5 self-start">
         {(
           [
             { label: "All", value: undefined },
@@ -264,10 +264,10 @@ export function ArchivePage() {
           <button
             key={opt.label}
             onClick={() => setTypeFilter(opt.value)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`px-4 py-1.5 rounded-lg text-[13px] font-medium transition-all duration-150 ${
               typeFilter === opt.value
-                ? "bg-white text-gray-900 shadow-sm"
-                : "text-gray-500 hover:text-gray-700"
+                ? "bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 shadow-sm shadow-gray-200/60 dark:shadow-black/20 ring-1 ring-gray-950/[0.04] dark:ring-white/[0.04]"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-gray-700/60"
             }`}
           >
             {opt.label}
@@ -277,7 +277,7 @@ export function ArchivePage() {
 
       {/* Stats row */}
       {tasks && tasks.length > 0 && (
-        <div className="flex gap-4 text-xs text-gray-500">
+        <div className="flex gap-4 text-xs text-gray-500 dark:text-gray-400">
           <span>{tasks.length} tasks</span>
           <span>{doneCount} done</span>
           {delegatedCount > 0 && <span>{delegatedCount} delegated</span>}
@@ -292,29 +292,29 @@ export function ArchivePage() {
 
       {/* List */}
       {isLoading ? (
-        <div className="bg-white rounded-2xl border border-gray-200 px-4 py-8 text-center text-gray-400 text-sm">
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200/60 dark:border-gray-700/60 shadow-sm shadow-gray-100 dark:shadow-black/20 px-4 py-8 text-center text-gray-400 dark:text-gray-500 text-sm">
           Loading...
         </div>
       ) : isError ? (
-        <div className="bg-red-50 border border-red-200 rounded-2xl px-4 py-6 text-center">
-          <p className="text-red-600 text-sm font-medium">Failed to load archive</p>
+        <div className="bg-red-50 dark:bg-red-950 border border-red-100 dark:border-red-900 rounded-2xl px-4 py-6 text-center">
+          <p className="text-red-600 dark:text-red-400 text-sm font-medium">Failed to load archive</p>
           <button
             onClick={() => refetch()}
-            className="mt-2 text-xs text-red-500 underline"
+            className="mt-2 text-xs text-red-500 dark:text-red-400 underline"
           >
             Retry
           </button>
         </div>
       ) : tasks && tasks.length > 0 ? (
-        <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200/60 dark:border-gray-700/60 shadow-sm shadow-gray-100 dark:shadow-black/20 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
           {tasks.map((task) => (
             <TaskArchiveRow key={task.id} task={task} />
           ))}
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-gray-200 px-4 py-12 text-center">
-          <p className="text-gray-400 text-sm">No completed tasks yet.</p>
-          <p className="text-gray-300 text-xs mt-1">
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200/60 dark:border-gray-700/60 shadow-sm shadow-gray-100 dark:shadow-black/20 px-4 py-12 text-center">
+          <p className="text-gray-400 dark:text-gray-500 text-sm">No completed tasks yet.</p>
+          <p className="text-gray-300 dark:text-gray-600 text-xs mt-1">
             Finished tasks will appear here.
           </p>
         </div>

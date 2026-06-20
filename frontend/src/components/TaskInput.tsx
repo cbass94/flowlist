@@ -132,17 +132,20 @@ export function TaskInput({ onTaskCreated }: Props) {
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="What needs to get done?"
-            className="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-3
-                       text-sm placeholder-gray-400 shadow-sm focus:border-blue-400
-                       focus:outline-none focus:ring-2 focus:ring-blue-100 transition-colors"
+            className="flex-1 rounded-xl border border-gray-200/80 dark:border-gray-700/80 bg-white dark:bg-gray-900 px-4 py-3
+                       text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 shadow-sm shadow-gray-100 dark:shadow-black/20
+                       focus-visible:border-blue-300 dark:focus-visible:border-blue-500 focus-visible:outline-none
+                       focus-visible:ring-2 focus-visible:ring-blue-500/20
+                       transition-all duration-150"
             autoFocus
           />
           <button
             onClick={handleSubmit}
             disabled={!inputText.trim()}
-            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-medium text-white
-                       shadow-sm hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed
-                       transition-colors"
+            className="rounded-xl bg-gray-900 dark:bg-gray-100 px-5 py-3 text-sm font-medium text-white dark:text-gray-900
+                       shadow-sm hover:bg-gray-800 dark:hover:bg-gray-200 active:scale-[0.97]
+                       disabled:opacity-30 disabled:cursor-not-allowed
+                       transition-all duration-150"
           >
             Add
           </button>
@@ -161,7 +164,7 @@ export function TaskInput({ onTaskCreated }: Props) {
       )}
 
       {createMutation.isError && (
-        <p className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-xs text-red-600">
+        <p className="rounded-lg bg-red-50 dark:bg-red-950 border border-red-100 dark:border-red-900 px-3 py-2 text-xs text-red-600 dark:text-red-400">
           Failed to save task — please try again.
         </p>
       )}

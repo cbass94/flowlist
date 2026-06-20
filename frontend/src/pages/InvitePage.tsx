@@ -27,33 +27,35 @@ export function InvitePage() {
   }, [token]);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center px-4">
       <div className="w-full max-w-sm space-y-8 text-center">
         {/* Branding */}
-        <div className="space-y-2">
-          <div className="text-5xl">✓</div>
-          <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+        <div className="space-y-3">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-2xl font-bold shadow-lg shadow-gray-900/20 dark:shadow-black/20">
+            F
+          </div>
+          <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50">
             FlowList
           </h1>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
             AI-powered task manager that schedules itself.
           </p>
         </div>
 
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 space-y-4">
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200/60 dark:border-gray-700/60 shadow-sm shadow-gray-200/50 dark:shadow-black/30 p-8 space-y-4">
           {state.phase === "loading" && (
-            <p className="text-sm text-gray-500">Verifying invite...</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Verifying invite...</p>
           )}
 
           {state.phase === "valid" && (
             <>
               <div className="space-y-1">
-                <p className="text-sm font-medium text-gray-800">
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-100">
                   You've been invited!
                 </p>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
                   Sign in with the Google account for{" "}
-                  <span className="font-semibold text-gray-700">
+                  <span className="font-semibold text-gray-700 dark:text-gray-200">
                     {state.email}
                   </span>
                 </p>
@@ -62,9 +64,11 @@ export function InvitePage() {
               <a
                 href="/api/auth/login/work"
                 className="flex items-center justify-center gap-3 w-full rounded-xl
-                           border border-gray-300 bg-white px-4 py-3 text-sm font-medium
-                           text-gray-700 shadow-sm hover:bg-gray-50 transition-colors
-                           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                           border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3 text-sm font-medium
+                           text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 active:scale-[0.98]
+                           transition-all duration-150
+                           focus-visible:outline-none focus-visible:ring-2
+                           focus-visible:ring-blue-500 focus-visible:ring-offset-2"
               >
                 {/* Google "G" icon */}
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -92,10 +96,10 @@ export function InvitePage() {
 
           {state.phase === "invalid" && (
             <div className="space-y-3">
-              <p className="text-sm text-gray-700 font-medium">
+              <p className="text-sm text-gray-700 dark:text-gray-200 font-medium">
                 Invite not found or expired
               </p>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
                 This invite link is invalid or has already been used. Contact
                 the FlowList admin for a new invite.
               </p>

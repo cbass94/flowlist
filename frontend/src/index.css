@@ -4,23 +4,30 @@
 
 @layer base {
   html {
-    /* Prevent iOS bounce scroll on drag */
     overscroll-behavior: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
   body {
-    /* Smooth touch scrolling */
     -webkit-overflow-scrolling: touch;
   }
 
-  /* Prevent text selection during drag */
   [data-dragging="true"] {
     user-select: none;
+  }
+
+  ::selection {
+    background-color: rgb(191 219 254 / 0.5);
+  }
+
+  .dark ::selection {
+    background-color: rgb(99 102 241 / 0.4);
   }
 }
 
 @layer utilities {
-  /* Hide number input arrows */
   .no-arrows::-webkit-outer-spin-button,
   .no-arrows::-webkit-inner-spin-button {
     -webkit-appearance: none;
