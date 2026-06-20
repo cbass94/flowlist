@@ -3,7 +3,7 @@ User repository — all database access for the users table.
 Solo app: there's only ever one user, but we don't hardcode that.
 """
 
-from datetime import datetime
+from datetime import datetime, time
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -115,6 +115,14 @@ async def update_settings(
     personal_calendar_id: str | None = None,
     allow_work_on_weekends: bool | None = None,
     allow_personal_on_weekends: bool | None = None,
+    work_saturday_start_time: time | None = None,
+    work_saturday_end_time: time | None = None,
+    work_sunday_start_time: time | None = None,
+    work_sunday_end_time: time | None = None,
+    personal_saturday_start_time: time | None = None,
+    personal_saturday_end_time: time | None = None,
+    personal_sunday_start_time: time | None = None,
+    personal_sunday_end_time: time | None = None,
 ) -> User | None:
     """Update user profile and scheduling settings. Only updates provided (non-None) fields."""
     user = await get_by_id(session, user_id)
@@ -156,6 +164,57 @@ async def update_settings(
     return user
 
 
+_WEEKEND_TIME_FIELDS = [
+    "work_saturday_start_time",
+    "work_saturday_end_time",
+    "work_sunday_start_time",
+    "work_sunday_end_time",
+    "personal_saturday_start_time",
+    "personal_saturday_end_time",
+    "personal_sunday_start_time",
+    "personal_sunday_end_time",
+]
+
+
+async def update_settings_with_nulls(
+    session: AsyncSession,
+    user_id: int,
+    updates: dict,
+) -> User | None:
+    """
+    Update user settings, allowing explicit null values for weekend time fields.
+
+    The regular update_settings() uses None as a sentinel for "not provided", so it
+    can't distinguish between "set to null" and "not changed".  This function accepts
+    the raw dict from model_dump(exclude_unset=True) and handles both cases.
+    """
+    weekend_nulls: dict[str, None] = {}
+    regular: dict = {}
+    for key, value in updates.items():
+        if key in _WEEKEND_TIME_FIELDS:
+            if value is None:
+                weekend_nulls[key] = None
+            else:
+                regular[key] = value
+        else:
+            regular[key] = value
+
+    user = await update_settings(session, user_id, **regular) if regular else await get_by_id(session, user_id)
+    if user is None:
+        return None
+
+    for field, val in weekend_nulls.items():
+        setattr(user, field, val)
+
+    # Set non-null weekend times via setattr as well
+    for key in _WEEKEND_TIME_FIELDS:
+        if key in updates and updates[key] is not None:
+            setattr(user, key, updates[key])
+
+    await session.flush()
+    return user
+
+
 async def update_personal_token(
     session: AsyncSession,
     user_id: int,
@@ -167,4 +226,19 @@ async def update_personal_token(
         update(User)
         .where(User.id == user_id)
         .values(personal_access_token=access_token, personal_token_expiry=token_expiry)
+    )
+
+
+async def disconnect_personal_account(session: AsyncSession, user_id: int) -> None:
+    """Clear all personal OAuth tokens, effectively disconnecting the personal account."""
+    from sqlalchemy import update
+    await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(
+            personal_google_id=None,
+            personal_access_token=None,
+            personal_refresh_token=None,
+            personal_token_expiry=None,
+        )
     )

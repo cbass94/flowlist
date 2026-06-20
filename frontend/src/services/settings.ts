@@ -13,6 +13,14 @@ export interface UpdateSettings {
   personal_calendar_id?: string;
   allow_work_on_weekends?: boolean;
   allow_personal_on_weekends?: boolean;
+  work_saturday_start_time?: string | null;
+  work_saturday_end_time?: string | null;
+  work_sunday_start_time?: string | null;
+  work_sunday_end_time?: string | null;
+  personal_saturday_start_time?: string | null;
+  personal_saturday_end_time?: string | null;
+  personal_sunday_start_time?: string | null;
+  personal_sunday_end_time?: string | null;
 }
 
 export const settingsApi = {

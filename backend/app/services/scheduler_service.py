@@ -149,6 +149,16 @@ async def schedule_all_tasks(
             buffer_minutes=user.buffer_minutes,
             max_block_minutes=settings.schedule_max_block_minutes,
             min_block_minutes=settings.schedule_min_block_minutes,
+            allow_work_on_weekends=user.allow_work_on_weekends,
+            allow_personal_on_weekends=user.allow_personal_on_weekends,
+            work_saturday_start_time=user.work_saturday_start_time,
+            work_saturday_end_time=user.work_saturday_end_time,
+            work_sunday_start_time=user.work_sunday_start_time,
+            work_sunday_end_time=user.work_sunday_end_time,
+            personal_saturday_start_time=user.personal_saturday_start_time,
+            personal_saturday_end_time=user.personal_saturday_end_time,
+            personal_sunday_start_time=user.personal_sunday_start_time,
+            personal_sunday_end_time=user.personal_sunday_end_time,
         )
 
         new_blocks, tasks_scheduled, created_events = await _assign_slots(

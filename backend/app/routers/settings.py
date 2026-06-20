@@ -36,6 +36,14 @@ def _user_to_settings(user: User) -> UserSettings:
         personal_calendar_id=user.personal_calendar_id,
         allow_work_on_weekends=user.allow_work_on_weekends,
         allow_personal_on_weekends=user.allow_personal_on_weekends,
+        work_saturday_start_time=user.work_saturday_start_time,
+        work_saturday_end_time=user.work_saturday_end_time,
+        work_sunday_start_time=user.work_sunday_start_time,
+        work_sunday_end_time=user.work_sunday_end_time,
+        personal_saturday_start_time=user.personal_saturday_start_time,
+        personal_saturday_end_time=user.personal_saturday_end_time,
+        personal_sunday_start_time=user.personal_sunday_start_time,
+        personal_sunday_end_time=user.personal_sunday_end_time,
     )
 
 
@@ -56,7 +64,7 @@ async def update_settings(
     if not updates:
         return ok(_user_to_settings(current_user))
 
-    user = await user_repo.update_settings(db, current_user.id, **updates)
+    user = await user_repo.update_settings_with_nulls(db, current_user.id, updates)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
 

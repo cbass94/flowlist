@@ -13,7 +13,7 @@ with `pytest` and no mocking.
 """
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -32,6 +32,15 @@ class SlotFinderConfig:
     min_block_minutes: int = 60
     allow_work_on_weekends: bool = False
     allow_personal_on_weekends: bool = True
+    # Per-day weekend hour ranges (None = day disabled for that task type)
+    work_saturday_start_time: time | None = None
+    work_saturday_end_time: time | None = None
+    work_sunday_start_time: time | None = None
+    work_sunday_end_time: time | None = None
+    personal_saturday_start_time: time | None = None
+    personal_saturday_end_time: time | None = None
+    personal_sunday_start_time: time | None = None
+    personal_sunday_end_time: time | None = None
 
 
 TaskType = Literal["work", "personal"]
@@ -75,6 +84,24 @@ def merge_intervals(intervals: list[Interval]) -> list[Interval]:
 # ── Public: valid-window builder ──────────────────────────────────────────────
 
 
+def _weekend_range(
+    target_date: date,
+    config: SlotFinderConfig,
+    task_type: TaskType,
+) -> tuple[time, time] | None:
+    """Return (start_time, end_time) for a weekend day, or None if disabled."""
+    is_sat = target_date.weekday() == 5
+    if task_type == "work":
+        st = config.work_saturday_start_time if is_sat else config.work_sunday_start_time
+        et = config.work_saturday_end_time if is_sat else config.work_sunday_end_time
+    else:
+        st = config.personal_saturday_start_time if is_sat else config.personal_sunday_start_time
+        et = config.personal_saturday_end_time if is_sat else config.personal_sunday_end_time
+    if st is not None and et is not None:
+        return (st, et)
+    return None
+
+
 def get_valid_windows(
     target_date: date,
     task_type: TaskType,
@@ -82,6 +109,7 @@ def get_valid_windows(
     config: SlotFinderConfig,
     is_off_hours_allowed: bool = False,
     is_workday_allowed: bool = False,
+    no_weekends: bool = False,
 ) -> list[Interval]:
     """
     Return the list of time windows within which an auto-block may be placed
@@ -90,19 +118,47 @@ def get_valid_windows(
     Work tasks:
       - Default: Mon–Fri, work_start → work_end
       - is_off_hours_allowed: hard_start → hard_end (any day)
+      - Weekends: use per-day hours if configured, else blocked
 
     Personal tasks:
       - Default: two windows — [hard_start, work_start] and [work_end, hard_end]
         (keeps personal tasks out of work hours)
       - is_workday_allowed: hard_start → hard_end (full day, any day)
+      - Weekends: use per-day hours if configured, else blocked
 
     Windows shorter than config.min_block_minutes are discarded.
     """
     min_window = timedelta(minutes=config.min_block_minutes)
+    hard_start_t = time(config.hard_start_hour, 0)
+    hard_end_t = time(config.hard_end_hour, 0)
+
+    if no_weekends and _is_weekend(target_date):
+        return []
 
     if task_type == "work":
-        if _is_weekend(target_date) and not is_off_hours_allowed and not config.allow_work_on_weekends:
-            return []
+        if _is_weekend(target_date):
+            if is_off_hours_allowed:
+                start = _local(target_date, config.hard_start_hour, 0, user_tz)
+                end = _local(target_date, config.hard_end_hour, 0, user_tz)
+                return [(start, end)] if end - start >= min_window else []
+
+            if not config.allow_work_on_weekends:
+                return []
+
+            rng = _weekend_range(target_date, config, "work")
+            if rng is not None:
+                ws, we = rng
+                ws = max(ws, hard_start_t)
+                we = min(we, hard_end_t)
+                start = _local(target_date, ws.hour, ws.minute, user_tz)
+                end = _local(target_date, we.hour, we.minute, user_tz)
+                return [(start, end)] if end - start >= min_window else []
+
+            # No per-day hours configured — fall back to weekday work hours
+            start = _local(target_date, config.work_start_hour, 0, user_tz)
+            end = _local(target_date, config.work_end_hour, 0, user_tz)
+            return [(start, end)] if end - start >= min_window else []
+
         if is_off_hours_allowed:
             start = _local(target_date, config.hard_start_hour, 0, user_tz)
             end = _local(target_date, config.hard_end_hour, 0, user_tz)
@@ -112,8 +168,26 @@ def get_valid_windows(
         return [(start, end)] if end - start >= min_window else []
 
     # personal
-    if _is_weekend(target_date) and not config.allow_personal_on_weekends and not is_workday_allowed:
-        return []
+    if _is_weekend(target_date):
+        if is_workday_allowed:
+            start = _local(target_date, config.hard_start_hour, 0, user_tz)
+            end = _local(target_date, config.hard_end_hour, 0, user_tz)
+            return [(start, end)] if end - start >= min_window else []
+
+        if not config.allow_personal_on_weekends:
+            return []
+
+        rng = _weekend_range(target_date, config, "personal")
+        if rng is not None:
+            ws, we = rng
+            ws = max(ws, hard_start_t)
+            we = min(we, hard_end_t)
+            start = _local(target_date, ws.hour, ws.minute, user_tz)
+            end = _local(target_date, we.hour, we.minute, user_tz)
+            return [(start, end)] if end - start >= min_window else []
+
+        # No per-day hours configured — fall back to weekday personal rules
+        pass
 
     hard_start = _local(target_date, config.hard_start_hour, 0, user_tz)
     hard_end = _local(target_date, config.hard_end_hour, 0, user_tz)
@@ -149,6 +223,7 @@ def find_free_slots(
     config: SlotFinderConfig,
     is_off_hours_allowed: bool = False,
     is_workday_allowed: bool = False,
+    no_weekends: bool = False,
     min_start: datetime | None = None,
 ) -> list[Interval]:
     """
@@ -174,7 +249,7 @@ def find_free_slots(
     """
     windows = get_valid_windows(
         target_date, task_type, user_tz, config,
-        is_off_hours_allowed, is_workday_allowed,
+        is_off_hours_allowed, is_workday_allowed, no_weekends,
     )
     if not windows:
         return []

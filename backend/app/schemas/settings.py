@@ -1,3 +1,4 @@
+from datetime import time
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -25,6 +26,15 @@ class UserSettings(BaseModel):
     # Weekend scheduling
     allow_work_on_weekends: bool = False
     allow_personal_on_weekends: bool = True
+    # Per-day weekend hour ranges (null = that day disabled)
+    work_saturday_start_time: Optional[time] = None
+    work_saturday_end_time: Optional[time] = None
+    work_sunday_start_time: Optional[time] = None
+    work_sunday_end_time: Optional[time] = None
+    personal_saturday_start_time: Optional[time] = None
+    personal_saturday_end_time: Optional[time] = None
+    personal_sunday_start_time: Optional[time] = None
+    personal_sunday_end_time: Optional[time] = None
 
 
 class UpdateSettings(BaseModel):
@@ -39,3 +49,12 @@ class UpdateSettings(BaseModel):
     personal_calendar_id: Optional[str] = Field(default=None, max_length=255)
     allow_work_on_weekends: Optional[bool] = None
     allow_personal_on_weekends: Optional[bool] = None
+    # Per-day weekend hour ranges — pass null to disable a day
+    work_saturday_start_time: Optional[time] = None
+    work_saturday_end_time: Optional[time] = None
+    work_sunday_start_time: Optional[time] = None
+    work_sunday_end_time: Optional[time] = None
+    personal_saturday_start_time: Optional[time] = None
+    personal_saturday_end_time: Optional[time] = None
+    personal_sunday_start_time: Optional[time] = None
+    personal_sunday_end_time: Optional[time] = None
