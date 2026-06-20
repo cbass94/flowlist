@@ -13,12 +13,13 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from app.config import settings
-from app.routers import ai, auth, invites, review_prompts, settings as settings_router, tasks, watchdog
+from app.routers import ai, auth, invites, mixpanel_proxy, settings as settings_router, tasks, watchdog
 
 log = logging.getLogger("flowlist.access")
 
 # Paths excluded from access logging (too noisy)
 _LOG_SKIP = {"/api/auth/me", "/api/healthz", "/health"}
+_LOG_SKIP_PREFIXES = ("/api/mp/",)
 
 
 # ── Request logging middleware ────────────────────────────────────────────────
@@ -26,7 +27,7 @@ _LOG_SKIP = {"/api/auth/me", "/api/healthz", "/health"}
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
-        if request.url.path in _LOG_SKIP:
+        if request.url.path in _LOG_SKIP or request.url.path.startswith(_LOG_SKIP_PREFIXES):
             return await call_next(request)
 
         start = time.perf_counter()
@@ -122,9 +123,9 @@ app.include_router(auth.router)
 app.include_router(tasks.router)
 app.include_router(ai.router)
 app.include_router(invites.router)
-app.include_router(review_prompts.router)
 app.include_router(watchdog.router)
 app.include_router(settings_router.router)
+app.include_router(mixpanel_proxy.router)
 
 
 # ── Health checks ─────────────────────────────────────────────────────────────
