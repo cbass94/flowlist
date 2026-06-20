@@ -1,6 +1,6 @@
 import enum
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, Time
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -46,6 +46,15 @@ class User(Base):
     # Weekend scheduling preferences
     allow_work_on_weekends = Column(Boolean, nullable=False, default=False, server_default="false")
     allow_personal_on_weekends = Column(Boolean, nullable=False, default=True, server_default="true")
+    # Per-day weekend hour ranges (null = that day is disabled)
+    work_saturday_start_time = Column(Time, nullable=True)
+    work_saturday_end_time = Column(Time, nullable=True)
+    work_sunday_start_time = Column(Time, nullable=True)
+    work_sunday_end_time = Column(Time, nullable=True)
+    personal_saturday_start_time = Column(Time, nullable=True)
+    personal_saturday_end_time = Column(Time, nullable=True)
+    personal_sunday_start_time = Column(Time, nullable=True)
+    personal_sunday_end_time = Column(Time, nullable=True)
 
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

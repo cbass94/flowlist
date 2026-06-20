@@ -1,5 +1,6 @@
 import enum
 
+import sqlalchemy as sa
 from sqlalchemy import (
     Boolean,
     Column,
@@ -41,8 +42,8 @@ class Task(Base):
             "procrastination_flag",
             postgresql_where="procrastination_flag = true",
         ),
-        # Watchdog candidate scan: incomplete tasks by created_at age
-        Index("ix_tasks_created_at", "created_at"),
+        # Watchdog candidate scan: incomplete tasks by updated_at age
+        Index("ix_tasks_updated_at", "updated_at"),
         # Split-task lookup: find continuations for a parent
         Index("ix_tasks_part_of_task_id", "part_of_task_id"),
     )
@@ -79,14 +80,19 @@ class Task(Base):
         Integer, ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
     )
 
+    no_weekends = Column(Boolean, nullable=False, default=False)
     procrastination_flag = Column(Boolean, nullable=False, default=False, index=True)
 
-    notes = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
 
     # Manually linked Google Calendar event (not auto-scheduled; user-associated)
     linked_calendar_event_id = Column(String(255), nullable=True)
     linked_calendar_event_title = Column(String(512), nullable=True)
     linked_calendar_event_start = Column(String(64), nullable=True)  # ISO datetime string
+
+    # Cached AI Assistant response (avoids re-calling Claude for unchanged tasks)
+    ai_assistant_cache = Column(sa.JSON, nullable=True)
+    ai_assistant_cached_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

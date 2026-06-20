@@ -22,19 +22,44 @@ export interface Task {
   optional_deadline: string | null;        // ISO date string YYYY-MM-DD
   scheduled_blocks: string[];
   next_scheduled_start: string | null;     // ISO datetime or null
+  blocks: TaskBlock[];                     // all active calendar chunks, ordered by start_at
   actual_duration_minutes: number | null;
   is_off_hours_allowed: boolean;
   is_workday_allowed: boolean;
+  no_weekends: boolean;
   part_of_task_id: number | null;
   procrastination_flag: boolean;
   created_at: string;
   completed_at: string | null;
   updated_at: string;
-  notes: string | null;
+  description: string | null;
   // Linked Google Calendar event (manually associated)
   linked_calendar_event_id: string | null;
   linked_calendar_event_title: string | null;
   linked_calendar_event_start: string | null;
+  // Cached AI Assistant response
+  ai_assistant_cache: AssistantCachedData | null;
+  ai_assistant_cached_at: string | null;
+}
+
+export interface TaskBlock {
+  id: number;
+  start_at: string;  // ISO datetime
+  end_at: string;    // ISO datetime
+}
+
+export interface MoreWorkSuggestion {
+  suggested_additional_minutes: number;
+  original_estimate_minutes: number | null;
+  scheduled_past_minutes: number;
+  scheduled_future_minutes: number;
+  ai_available: boolean;
+}
+
+export interface AssistantCachedData {
+  summary: string;
+  suggestions: AssistantSuggestionItem[];
+  recommended_workflow: string;
 }
 
 export interface AISuggestion {
@@ -57,6 +82,43 @@ export interface ParseResponse {
   ai_available: boolean;
 }
 
+export interface AssistantSuggestionItem {
+  tool_or_approach: string;
+  description: string;
+  time_saved: string;
+}
+
+export interface AssistantResponse {
+  summary: string;
+  suggestions: AssistantSuggestionItem[];
+  recommended_workflow: string;
+  ai_available: boolean;
+}
+
+export interface AssistantRequest {
+  task_id?: number;
+  title: string;
+  type: TaskType;
+  estimated_duration_minutes?: number;
+  description?: string;
+  optional_deadline?: string;
+  is_off_hours_allowed?: boolean;
+  is_workday_allowed?: boolean;
+  no_weekends?: boolean;
+  linked_calendar_event_title?: string;
+  linked_calendar_event_start?: string;
+}
+
+export interface FeedbackRequest {
+  task_id?: number;
+  task_title: string;
+  task_type: TaskType;
+  is_positive: boolean;
+  comment?: string;
+  ai_summary: string;
+  ai_suggestions: string;
+}
+
 export interface TaskCreate {
   title: string;
   type: TaskType;
@@ -66,7 +128,8 @@ export interface TaskCreate {
   optional_deadline?: string;
   is_off_hours_allowed?: boolean;
   is_workday_allowed?: boolean;
-  notes?: string;
+  no_weekends?: boolean;
+  description?: string;
   part_of_task_id?: number;
   ai_confidence?: ConfidenceLevel;
   ai_keywords?: string[];
@@ -82,7 +145,8 @@ export interface TaskUpdate {
   optional_deadline?: string;
   is_off_hours_allowed?: boolean;
   is_workday_allowed?: boolean;
-  notes?: string;
+  no_weekends?: boolean;
+  description?: string;
   procrastination_flag?: boolean;
   linked_calendar_event_id?: string | null;
   linked_calendar_event_title?: string | null;
@@ -123,6 +187,14 @@ export interface UserSettings {
   personal_calendar_id: string | null;
   allow_work_on_weekends: boolean;
   allow_personal_on_weekends: boolean;
+  work_saturday_start_time: string | null;
+  work_saturday_end_time: string | null;
+  work_sunday_start_time: string | null;
+  work_sunday_end_time: string | null;
+  personal_saturday_start_time: string | null;
+  personal_saturday_end_time: string | null;
+  personal_sunday_start_time: string | null;
+  personal_sunday_end_time: string | null;
 }
 
 export interface CalendarItem {
@@ -149,4 +221,13 @@ export interface Invite {
   accepted_at: string | null;
   expires_at: string | null;
   status: InviteStatus;
+}
+
+export interface RescheduleAllOverdueResponse {
+  rescheduled_task_ids: number[];
+  task_count: number;
+}
+
+export interface BlockDoneRequest {
+  confirmed_remaining_minutes: number;
 }
