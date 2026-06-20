@@ -1,6 +1,9 @@
 import api from "./api";
 import type {
+  BlockDoneRequest,
   CompleteRequest,
+  MoreWorkSuggestion,
+  RescheduleAllOverdueResponse,
   ReorderRequest,
   Task,
   TaskCreate,
@@ -36,7 +39,32 @@ export const tasksApi = {
     return api.post<Task>(`/tasks/${id}/delegate`).then((r) => r.data);
   },
 
-  createPart2(id: number): Promise<Task> {
-    return api.post<Task>(`/tasks/${id}/create-part2`).then((r) => r.data);
+  rescheduleOverdue(id: number): Promise<Task> {
+    return api.post<Task>(`/tasks/${id}/reschedule-overdue`).then((r) => r.data);
+  },
+
+  rescheduleAllOverdue(): Promise<RescheduleAllOverdueResponse> {
+    return api.post<RescheduleAllOverdueResponse>("/tasks/reschedule-all-overdue").then((r) => r.data);
+  },
+
+  moreWorkSuggestion(id: number): Promise<MoreWorkSuggestion> {
+    return api.get<MoreWorkSuggestion>(`/tasks/${id}/more-work-suggestion`).then((r) => r.data);
+  },
+
+  moreWork(id: number, additional_minutes: number): Promise<Task> {
+    return api.post<Task>(`/tasks/${id}/more-work`, { additional_minutes }).then((r) => r.data);
+  },
+
+  deleteBlock(taskId: number, blockId: number): Promise<Task> {
+    return api.delete<Task>(`/tasks/${taskId}/blocks/${blockId}`).then((r) => r.data);
+  },
+
+  blockDone(taskId: number, blockId: number, confirmed_remaining_minutes: number): Promise<Task> {
+    return api.post<Task>(`/tasks/${taskId}/blocks/${blockId}/done`, { confirmed_remaining_minutes })
+      .then((r) => r.data);
+  },
+
+  blockReschedule(taskId: number, blockId: number): Promise<Task> {
+    return api.post<Task>(`/tasks/${taskId}/blocks/${blockId}/reschedule`).then((r) => r.data);
   },
 };

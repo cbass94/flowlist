@@ -81,7 +81,7 @@ async def get_watchdog_candidates(
         select(Task).where(
             Task.user_id == user_id,
             Task.status.notin_([TaskStatus.done, TaskStatus.delegated]),
-            Task.created_at <= cutoff,
+            Task.updated_at <= cutoff,
         )
     )
     return list(result.scalars().all())
@@ -105,6 +105,14 @@ async def get_tentatively_done(session: AsyncSession, user_id: int) -> list[Task
     return await get_by_status(session, user_id, TaskStatus.tentatively_done)
 
 
+async def get_continuation_tasks(session: AsyncSession, parent_task_id: int) -> list[Task]:
+    """Return all tasks that are continuations (Part 2, etc.) of the given parent task."""
+    result = await session.execute(
+        select(Task).where(Task.part_of_task_id == parent_task_id)
+    )
+    return list(result.scalars().all())
+
+
 # ── Write ─────────────────────────────────────────────────────────────────────
 
 
@@ -120,8 +128,9 @@ async def create(
     optional_deadline: datetime | None = None,
     is_off_hours_allowed: bool = False,
     is_workday_allowed: bool = False,
+    no_weekends: bool = False,
     part_of_task_id: int | None = None,
-    notes: str | None = None,
+    description: str | None = None,
 ) -> Task:
     task = Task(
         user_id=user_id,
@@ -134,8 +143,9 @@ async def create(
         optional_deadline=optional_deadline,
         is_off_hours_allowed=is_off_hours_allowed,
         is_workday_allowed=is_workday_allowed,
+        no_weekends=no_weekends,
         part_of_task_id=part_of_task_id,
-        notes=notes,
+        description=description,
     )
     session.add(task)
     await session.flush()  # populate task.id without committing

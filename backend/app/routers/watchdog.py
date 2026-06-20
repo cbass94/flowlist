@@ -14,7 +14,7 @@ from app.database import get_db
 from app.models.user import User
 from app.repositories import calendar_block_repo, task_repo
 from app.schemas.envelope import ApiResponse, ok
-from app.schemas.task import TaskRead
+from app.schemas.task import TaskBlockInfo, TaskRead
 from app.services.auth_service import get_current_user
 
 router = APIRouter(prefix="/api/watchdog", tags=["watchdog"])
@@ -29,8 +29,12 @@ async def get_watchdog_tasks(
     tasks = await task_repo.get_procrastination_flagged(db, current_user.id)
     task_ids = [t.id for t in tasks]
     next_starts = await calendar_block_repo.get_earliest_start_by_task_ids(db, task_ids)
+    blocks_map = await calendar_block_repo.get_active_blocks_by_task_ids(db, task_ids)
     reads = [
-        TaskRead.model_validate(t).model_copy(update={"next_scheduled_start": next_starts.get(t.id)})
+        TaskRead.model_validate(t).model_copy(update={
+            "next_scheduled_start": next_starts.get(t.id),
+            "blocks": [TaskBlockInfo.model_validate(b) for b in blocks_map.get(t.id, [])],
+        })
         for t in tasks
     ]
     return ok(reads, meta={"total": len(reads)})

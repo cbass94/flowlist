@@ -98,9 +98,23 @@ async def _get_valid_credentials(
     )
     if needs_refresh:
         log.info("_get_valid_credentials: refreshing %s token for user %d", account, user.id)
-        new_access, new_expiry = await oauth_service.refresh_access_token(
-            account, refresh_token
-        )
+        try:
+            new_access, new_expiry = await oauth_service.refresh_access_token(
+                account, refresh_token
+            )
+        except ValueError as exc:
+            if account == "personal" and "invalid_grant" in str(exc):
+                log.warning(
+                    "_get_valid_credentials: personal token revoked for user %d — auto-disconnecting",
+                    user.id,
+                )
+                async with db.begin_nested():
+                    await user_repo.disconnect_personal_account(db, user.id)
+                raise ValueError(
+                    "Personal Google account authorization has expired. "
+                    "Please reconnect your personal account in Settings."
+                ) from exc
+            raise
         creds = Credentials(
             token=new_access,
             refresh_token=refresh_token,
@@ -127,16 +141,30 @@ def _build_service(credentials: Credentials):
 # ── Event helpers ─────────────────────────────────────────────────────────────
 
 
+def _build_gcal_description(task: Task) -> str:
+    """
+    Build the Google Calendar event description string for a FlowList task.
+
+    Format when task has a description:
+        [user description text]
+
+        ---
+        [FlowList] task_id: {id}
+
+    Format when no description:
+        [FlowList] task_id: {id}
+    """
+    footer = f"{FLOWLIST_TAG} task_id: {task.id}"
+    if task.description:
+        return f"{task.description}\n\n---\n{footer}"
+    return footer
+
+
 def _build_event_body(task: Task, start_dt: datetime, end_dt: datetime) -> dict[str, Any]:
     """Build the Google Calendar event resource dict for a FlowList task block."""
-    description_parts = [FLOWLIST_TAG]
-    if task.notes:
-        description_parts.append(task.notes)
-    description = "\n\n".join(description_parts)
-
     return {
         "summary": task.title,
-        "description": description,
+        "description": _build_gcal_description(task),
         "start": {"dateTime": start_dt.isoformat(), "timeZone": "UTC"},
         "end": {"dateTime": end_dt.isoformat(), "timeZone": "UTC"},
         # Machine-readable identifier so we can find our events robustly
@@ -307,6 +335,51 @@ async def delete_calendar_block(
     await calendar_block_repo.soft_delete(db, block.id)
 
 
+async def update_future_block_descriptions(
+    user: User,
+    db: AsyncSession,
+    task: Task,
+) -> None:
+    """
+    Patch the description of all future (not-yet-started) FlowList calendar events
+    for a task. Called when a task's description field is updated.
+    Past blocks are left untouched.
+    """
+    now = datetime.now(tz=timezone.utc)
+    future_blocks = await calendar_block_repo.get_active_future_blocks_for_task(
+        db, task.id, after=now
+    )
+    if not future_blocks:
+        return
+
+    new_description = _build_gcal_description(task)
+
+    for block in future_blocks:
+        creds = await _get_valid_credentials(user, block.account, db)  # type: ignore[arg-type]
+        cal_id = block.calendar_id
+        ev_id = block.google_event_id
+
+        def _patch(_cal=cal_id, _ev=ev_id, _creds=creds) -> None:
+            service = _build_service(_creds)
+            service.events().patch(
+                calendarId=_cal,
+                eventId=_ev,
+                body={"description": new_description},
+            ).execute()
+
+        try:
+            await asyncio.to_thread(_patch)
+            log.info(
+                "update_future_block_descriptions: patched event %s for task %d",
+                ev_id, task.id,
+            )
+        except Exception as exc:
+            log.warning(
+                "update_future_block_descriptions: failed to patch event %s for task %d: %s",
+                ev_id, task.id, exc,
+            )
+
+
 async def _get_freebusy(
     user: User,
     db: AsyncSession,
@@ -424,6 +497,14 @@ async def find_free_slots_for_task(
         min_block_minutes=settings.schedule_min_block_minutes,
         allow_work_on_weekends=user.allow_work_on_weekends,
         allow_personal_on_weekends=user.allow_personal_on_weekends,
+        work_saturday_start_time=user.work_saturday_start_time,
+        work_saturday_end_time=user.work_saturday_end_time,
+        work_sunday_start_time=user.work_sunday_start_time,
+        work_sunday_end_time=user.work_sunday_end_time,
+        personal_saturday_start_time=user.personal_saturday_start_time,
+        personal_saturday_end_time=user.personal_saturday_end_time,
+        personal_sunday_start_time=user.personal_sunday_start_time,
+        personal_sunday_end_time=user.personal_sunday_end_time,
     )
 
     task_type = task.type.value  # "work" or "personal"
@@ -437,6 +518,7 @@ async def find_free_slots_for_task(
         config=config,
         is_off_hours_allowed=task.is_off_hours_allowed,
         is_workday_allowed=task.is_workday_allowed,
+        no_weekends=task.no_weekends,
         min_start=min_start,
     )
 

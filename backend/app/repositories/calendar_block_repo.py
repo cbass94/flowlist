@@ -59,6 +59,25 @@ async def get_all_blocks_for_task(
     return list(result.scalars().all())
 
 
+async def get_active_future_blocks_for_task(
+    session: AsyncSession,
+    task_id: int,
+    after: datetime | None = None,
+) -> list[CalendarBlock]:
+    """Non-deleted blocks for a specific task starting at or after `after` (default: now)."""
+    cutoff = after or datetime.now(tz=timezone.utc)
+    result = await session.execute(
+        select(CalendarBlock)
+        .where(
+            CalendarBlock.task_id == task_id,
+            CalendarBlock.is_deleted.is_(False),
+            CalendarBlock.start_at >= cutoff,
+        )
+        .order_by(CalendarBlock.start_at)
+    )
+    return list(result.scalars().all())
+
+
 async def get_active_future_blocks(
     session: AsyncSession,
     after: datetime | None = None,
@@ -153,24 +172,57 @@ async def soft_delete_by_task(
     return len(rows)
 
 
+async def get_active_blocks_by_task_ids(
+    session: AsyncSession,
+    task_ids: list[int],
+) -> dict[int, list[CalendarBlock]]:
+    """
+    Return {task_id: [blocks ordered by start_at]} for the given task IDs.
+    Avoids N+1 when populating per-task block lists for the frontend.
+    """
+    if not task_ids:
+        return {}
+    result = await session.execute(
+        select(CalendarBlock)
+        .where(
+            CalendarBlock.task_id.in_(task_ids),
+            CalendarBlock.is_deleted.is_(False),
+        )
+        .order_by(CalendarBlock.task_id, CalendarBlock.start_at)
+    )
+    grouped: dict[int, list[CalendarBlock]] = {tid: [] for tid in task_ids}
+    for block in result.scalars().all():
+        grouped.setdefault(block.task_id, []).append(block)
+    return grouped
+
+
 async def get_earliest_start_by_task_ids(
     session: AsyncSession,
     task_ids: list[int],
 ) -> dict[int, datetime]:
     """
-    Return {task_id: earliest_future_start_at} for the given task IDs.
+    Return {task_id: next_start_at} for the given task IDs.
+    Prefers the earliest future block; falls back to the earliest past block
+    so overdue tasks still surface their (past) scheduled time.
     Avoids N+1 queries when populating next_scheduled_start on a task list.
     """
     if not task_ids:
         return {}
+    from sqlalchemy import case
     from sqlalchemy import func as sqlfunc
     now = datetime.now(tz=timezone.utc)
+    # COALESCE(MIN(start_at where future), MIN(start_at)) — prefer future blocks
     result = await session.execute(
-        select(CalendarBlock.task_id, sqlfunc.min(CalendarBlock.start_at))
+        select(
+            CalendarBlock.task_id,
+            sqlfunc.coalesce(
+                sqlfunc.min(case((CalendarBlock.start_at >= now, CalendarBlock.start_at))),
+                sqlfunc.min(CalendarBlock.start_at),
+            ),
+        )
         .where(
             CalendarBlock.task_id.in_(task_ids),
             CalendarBlock.is_deleted.is_(False),
-            CalendarBlock.start_at >= now,
         )
         .group_by(CalendarBlock.task_id)
     )
