@@ -8,16 +8,14 @@ Jobs:
       fire one reschedule: the last writer wins.
 
 Cron tasks:
-  tentatively_done_checker(ctx)
-      Runs every 15 minutes. Transitions tasks whose scheduled block end-times
-      have passed (and the task isn't marked done) to "tentatively_done".
-
   procrastination_watchdog(ctx)
       Runs daily at 8am. Sets procrastination_flag on tasks that have been
       sitting unfinished for 14+ days.
 
-  weekly_full_reschedule(ctx)
-      Runs weekly on Sunday at 20:00 (8pm). Full reschedule for all users.
+  daily_full_reschedule(ctx)
+      Runs daily at 09:00 UTC (~4am America/Chicago). Full reschedule for all
+      users — re-optimises the entire future backlog against the real calendar,
+      catching anything left behind by 72h windowed (priority-change) runs.
 
 Worker startup:
   The ARQ worker is started by docker-compose as a separate container running:
@@ -27,7 +25,6 @@ Worker startup:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
 from arq import cron
@@ -38,7 +35,7 @@ from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models.scheduling_run_log import ScheduleTrigger
 from app.models.task import TaskStatus
-from app.repositories import calendar_block_repo, task_repo, user_repo
+from app.repositories import task_repo, user_repo
 from app.services import scheduler_service
 
 log = logging.getLogger(__name__)
@@ -168,51 +165,6 @@ async def reschedule_all(ctx: dict, user_id: int, token: str) -> None:
 # ── Cron tasks ────────────────────────────────────────────────────────────────
 
 
-async def tentatively_done_checker(ctx: dict) -> None:
-    """
-    Check every 15 minutes for scheduled tasks whose calendar block end-time
-    has passed without the task being marked done. Transition those to
-    "tentatively_done" so the user gets a review prompt.
-    """
-    now = datetime.now(tz=timezone.utc)
-    log.debug("tentatively_done_checker: running at %s", now.isoformat())
-
-    async with AsyncSessionLocal() as db:
-        users = await user_repo.get_all(db)
-        for user in users:
-            await _check_tentatively_done_for_user(db, user.id, now)
-
-
-async def _check_tentatively_done_for_user(
-    db: AsyncSession,
-    user_id: int,
-    now: datetime,
-) -> None:
-    """
-    For a single user, find scheduled tasks whose latest block has ended
-    and transition them to tentatively_done.
-    """
-    scheduled_tasks = await task_repo.get_by_status(db, user_id, TaskStatus.scheduled)
-
-    for task in scheduled_tasks:
-        # Get all active (non-deleted) blocks for this task
-        blocks = await calendar_block_repo.get_active_blocks_for_task(db, task.id)
-        if not blocks:
-            continue
-
-        # The task's latest block — if it has ended, prompt the user
-        latest_block = max(blocks, key=lambda b: b.end_at)
-        if latest_block.end_at <= now:
-            await task_repo.update_fields(
-                db, task.id, status=TaskStatus.tentatively_done
-            )
-            await db.commit()
-            log.info(
-                "tentatively_done_checker: task %d '%s' → tentatively_done",
-                task.id, task.title[:40],
-            )
-
-
 async def procrastination_watchdog(ctx: dict) -> None:
     """
     Daily watchdog: set procrastination_flag on tasks that have been sitting
@@ -244,11 +196,15 @@ async def _run_watchdog_for_user(
             await db.commit()
             flagged_count += 1
 
-    # Clear flag on tasks that have since been completed or are recently active
+    # Clear flag on tasks that are now terminal or have been touched recently
+    from datetime import timedelta
+    cutoff = datetime.now(tz=timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ) - timedelta(days=threshold_days)
     flagged = await task_repo.get_procrastination_flagged(db, user_id)
     terminal = {TaskStatus.done, TaskStatus.delegated}
     for task in flagged:
-        if task.status in terminal:
+        if task.status in terminal or task.updated_at > cutoff:
             await task_repo.set_procrastination_flag(db, task.id, False)
             await db.commit()
             cleared_count += 1
@@ -260,12 +216,17 @@ async def _run_watchdog_for_user(
         )
 
 
-async def weekly_full_reschedule(ctx: dict) -> None:
+async def daily_full_reschedule(ctx: dict) -> None:
     """
-    Weekly full reschedule (Sunday 20:00). Re-optimises the entire future backlog
-    against the real calendar, consolidating any gaps that have built up.
+    Daily full reschedule (09:00 UTC ≈ 4am America/Chicago). Re-optimises the
+    entire future backlog against the real calendar, consolidating gaps and
+    re-sorting everything into strict priority order. Runs overnight so it never
+    shifts blocks around while the user is mid-day.
+
+    This catches up anything that 72h windowed (priority-change) reschedules
+    left behind beyond their window.
     """
-    log.info("weekly_full_reschedule: starting")
+    log.info("daily_full_reschedule: starting")
     async with AsyncSessionLocal() as db:
         users = await user_repo.get_all(db)
         for user in users:
@@ -274,7 +235,7 @@ async def weekly_full_reschedule(ctx: dict) -> None:
                 user=user,
                 trigger=ScheduleTrigger.startup,  # closest semantic match
             )
-    log.info("weekly_full_reschedule: done")
+    log.info("daily_full_reschedule: done")
 
 
 # ── Worker settings ───────────────────────────────────────────────────────────
@@ -292,12 +253,11 @@ class WorkerSettings:
     functions = [reschedule_all]
 
     cron_jobs = [
-        # Tentatively-done checker: every 15 minutes
-        cron(tentatively_done_checker, minute={0, 15, 30, 45}),
-        # Procrastination watchdog: daily at 8:00am
+        # Procrastination watchdog: daily at 8:00am UTC
         cron(procrastination_watchdog, hour=8, minute=0),
-        # Weekly full reschedule: Sunday at 20:00
-        cron(weekly_full_reschedule, weekday=6, hour=20, minute=0),
+        # Full reschedule: daily at 09:00 UTC (~4am America/Chicago) — overnight
+        # so it never shifts upcoming blocks while the user is mid-day.
+        cron(daily_full_reschedule, hour=9, minute=0),
     ]
 
     on_startup = startup
