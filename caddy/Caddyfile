@@ -59,7 +59,7 @@
         #    during the redirect flow) and googleapis for Calendar API (server-side
         #    calls are proxied through the backend, so not strictly needed here).
         #  - Anthropic API is called server-side only — not in connect-src.
-        Content-Security-Policy            "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com wss:; frame-src https://accounts.google.com; object-src 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com"
+        Content-Security-Policy            "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com https://api.mixpanel.com wss:; frame-src https://accounts.google.com; object-src 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com"
 
         # Remove server fingerprinting
         -Server

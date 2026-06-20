@@ -2,7 +2,20 @@
   "permissions": {
     "allow": [
       "Bash(docker compose:*)",
-      "Bash(docker system:*)"
+      "Bash(docker system:*)",
+      "Bash(npx tsc *)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(ls node_modules/.bin/tsc*)",
+      "Bash(ls node_modules/typescript/bin/)",
+      "Bash(node node_modules/typescript/bin/tsc --noEmit)",
+      "Bash(MSYS_NO_PATHCONV=1 docker compose exec *)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:8000/api/healthz)",
+      "Bash(curl -s -o /dev/null -w \"tasks list \\(no auth\\): HTTP %{http_code}\\\\n\" http://localhost:8000/api/tasks/)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:8000/health)",
+      "Bash(docker exec *)",
+      "Bash(git add *)",
+      "Bash(git commit -m '@ *)",
+      "Bash(git commit *)"
     ]
   }
 }

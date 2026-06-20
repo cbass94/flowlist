@@ -23,7 +23,7 @@ Each task has:
 - title: natural language input
 - type: Work | Personal (maps to different Google Calendars)
 - priority: position in ordered backlog (drag-to-reorder)
-- status: Backlog | Scheduled | Tentatively Done | Done | Delegated
+- status: Backlog | Scheduled | Done | Delegated
 - estimated_duration_minutes: AI-generated, user-overridable
 - optional_user_estimate: optional time estimate in hours entered by the user 
   (in 0.5 hour increments, e.g. 0.5, 1, 1.5, 2). When provided, the AI uses 
@@ -41,6 +41,11 @@ Each task has:
 - Work tasks default to Mon-Fri, 8:00am-5:00pm in user's timezone
 - Personal tasks default to outside work hours, unless is_workday_allowed = true
 - Absolute hard limits: nothing before 7:00am or after 10:00pm (any day)
+- Weekend scheduling: per-day (Saturday/Sunday) configurable hour ranges,
+  independently settable for work and personal task types. Each day can be
+  enabled/disabled with its own start/end times (default 9am–5pm when
+  first enabled). Hard limits still apply as a ceiling. Null start/end
+  means that day is disabled for that task type.
 - Buffer rule: 30 minutes of clear calendar time REQUIRED before any auto-scheduled block.
   No buffer required after — it's fine if another event (manual or auto) starts immediately
   after an auto-block ends.
@@ -57,10 +62,13 @@ Each task has:
 - This creates natural breathing room and reduces calendar noise
 - When a priority change occurs, only reschedule the next 72 hours of auto-blocks 
   (not all future blocks)
-- A full reschedule of all future blocks runs automatically once per week 
-  (Sunday at 8pm) and can also be triggered manually by the user
-- This weekly full reschedule consolidates any gaps that have built up and 
-  re-optimizes the entire backlog order against the real calendar
+- A full reschedule of all future blocks runs automatically once per day
+  (overnight, 09:00 UTC ≈ 4am America/Chicago) and can also be triggered
+  manually by the user
+- This daily full reschedule consolidates any gaps that have built up and 
+  re-optimizes the entire backlog order against the real calendar, catching up
+  anything left behind by 72h windowed (priority-change) reschedules. It runs
+  overnight so it never shifts upcoming blocks while the user is mid-day.
 - The manual "Reschedule Now" button in Settings triggers a full reschedule 
   immediately for cases where the user has made major backlog changes
 
@@ -77,14 +85,30 @@ Each task has:
 - Schedule highest priority tasks in earliest available slots
 - Lower priority tasks get later slots
 - Each task's scheduled start date is visible in the backlog list view
-- When a calendar block's end time passes and task is not marked done,
-  status auto-transitions to "Tentatively Done" with a review prompt
 
-## "Tentatively Done" Flow
-- User sees prompt: confirm complete, or reschedule
-- If rescheduling: creates a "Part 2" task, same priority as original,
-  same type, pre-filled title as "[Original Title] - Part 2"
-- User can adjust priority of Part 2 before saving
+## Missed/Overdue Block Flow
+When a task's scheduled block START time passes and the task is still in
+Scheduled status (not Done or Delegated):
+
+**Visual indicator:** The scheduled time label on the collapsed task card
+switches from green to a muted gray with a small clock icon — subtle, not
+a banner or aggressive highlight.
+
+**Two equal action buttons** appear in the expanded card:
+1. **Reschedule** — Cancels all existing calendar blocks for the task
+   (GCal + DB soft-delete), then enqueues a full reschedule. The task keeps
+   its current backlog priority; the scheduler finds the next available slot
+   from now. No prompts, no priority changes.
+2. **I Have More Work To Do** — Cancels all existing calendar blocks for the
+   original task, creates a "Part 2" continuation task at the same priority,
+   increments the original's priority by 1 (so Part 2 slots in ahead), then
+   enqueues a full reschedule. Both the original and Part 2 get new blocks.
+
+**Rules:**
+- Both buttons appear only when status=Scheduled AND start time has passed.
+- Neither button appears on upcoming tasks.
+- The calendar event is moved only on explicit user action — never automatically.
+- Trigger is the block START time, not end time.
 
 ## Procrastination Watchdog
 - Background job checks daily for tasks unscheduled or incomplete for 14+ days
@@ -100,6 +124,17 @@ Each task has:
 - Auth: Google OAuth 2.0 (primary work account + secondary personal account connection)
 - AI: Anthropic Claude API (claude-sonnet-4-20250514)
 - Calendar: Google Calendar API v3
+
+## Development Workflow
+- After making code changes to frontend or backend files, always rebuild and restart
+  the affected Docker containers so changes take effect:
+  `cd /c/Projects/flowlist && docker compose up -d --build frontend backend worker`
+- The worker container shares the backend image, so rebuild it whenever backend changes.
+- Frontend and backend run in Docker — there are no local node_modules or Python venv.
+- Adding a new npm package requires two steps (the anonymous node_modules volume must
+  be renewed so the container picks up the newly installed package):
+  1. `docker compose run --rm --no-deps frontend npm install`  ← updates package-lock.json
+  2. `docker compose up -d --build -V frontend`               ← rebuilds image + renews volume
 
 ## Design Principles
 - Mobile-responsive web app (no native mobile app)
@@ -145,32 +180,7 @@ Each task has:
 - Scheduler: 72-hour windowed reschedule for priority changes, full reschedule 
   for all other triggers
 - Debounce: Redis token pattern, 2-second delay on priority change jobs
-- Cron jobs: tentatively_done_checker (15 min), procrastination_watchdog (daily 
-  8am), weekly_full_reschedule (Sunday 8pm)
-- Rollback: best-effort GCal event deletion on scheduler failure
-- Scheduling cap: 2 work blocks + 2 personal blocks per day maximum
-- scheduled_blocks normalized into calendar_blocks table (not stored on tasks)
-- Soft-delete pattern used on calendar_blocks (is_deleted + deleted_at)
-- Alembic used for database migrations
-- Seed data script at scripts/seed.py
-- Token encryption: Fernet (AES-128-CBC + HMAC-SHA256)
-- Session management: itsdangerous signed cookies (stateless)
-- OAuth state anti-CSRF: Redis nonce with 5-minute TTL
-- FlowList calendar events identified by: [FlowList] in description
-  + extendedProperties.private.flowlist = "true"
-- Both calendars queried via single freebusy call through work account
-- slot_finder.py is pure (no I/O) — all logic testable without DB or API
-- AI forced tool-use (tool_choice) to guarantee structured JSON output
-- AI graceful degradation: all 3 Anthropic error types caught, returns
-  ai_available=False with sensible defaults
-- Task input UI: 5-phase state machine (idle → loading → confirming → saving → idle)
-  with optimistic skeleton loading
-- User time estimate: hours only, 0.5 increment numeric input
-- Scheduler: 72-hour windowed reschedule for priority changes, full reschedule
-  for all other triggers
-- Debounce: Redis token pattern, 2-second delay on priority change jobs
-- Cron jobs: tentatively_done_checker (15 min), procrastination_watchdog (daily
-  8am), weekly_full_reschedule (Sunday 8pm)
+- Cron jobs: procrastination_watchdog (daily 8am UTC), daily_full_reschedule (daily 09:00 UTC ≈ 4am America/Chicago)
 - Rollback: best-effort GCal event deletion on scheduler failure
 - Scheduling cap: 2 work blocks + 2 personal blocks per day maximum
 - Database migration fix: alembic.ini uses static placeholder URL, env.py
@@ -205,3 +215,8 @@ Each task has:
 - Cloudflare Tunnel: cloudflared container in docker-compose using token from env
 - Caddy: trusted_proxies for Cloudflare IPs; HSTS; CSP; forwards CF-Connecting-IP
 - security.txt at /security.txt (served from frontend/public/)
+- Overdue handling: ReviewPromptBanner and review-prompts API removed;
+  overdue/missed blocks handled entirely via in-card flow in TaskRow
+  (gray clock icon + Reschedule / "I Have More Work To Do" buttons).
+  tentatively_done status kept in DB enum but not surfaced as a distinct
+  UI state — treated the same as scheduled-and-overdue.
