@@ -122,7 +122,7 @@ a banner or aggressive highlight.
 - Caching + job queue: Redis 7 + ARQ
 - Reverse proxy: Caddy 2
 - Auth: Google OAuth 2.0 (primary work account + secondary personal account connection)
-- AI: Anthropic Claude API (claude-sonnet-4-20250514)
+- AI: Anthropic Claude API (claude-sonnet-4-6)
 - Calendar: Google Calendar API v3
 
 ## Development Workflow
