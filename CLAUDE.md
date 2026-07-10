@@ -110,6 +110,34 @@ a banner or aggressive highlight.
 - The calendar event is moved only on explicit user action — never automatically.
 - Trigger is the block START time, not end time.
 
+## Synthesis Time
+- After any meeting that includes at least one attendee other than the user
+  (i.e. someone outside the user's own email set), FlowList books a short
+  "Synthesis time" block immediately after the meeting ends — carved-out time
+  to synthesize meeting output before moving on (Default Mode Network buffer).
+- Default duration: 15 minutes (user-configurable in Settings).
+- Qualifying meeting: timed (not all-day), not cancelled, not a special
+  eventType (outOfOffice/focusTime/workingLocation), user has NOT declined,
+  and ≥1 non-resource attendee whose email isn't in synthesis_self_emails.
+- synthesis_self_emails: user-configurable comma-separated list of "these are
+  me" addresses; always includes the login email. Not hardcoded.
+- Placement rules:
+  - Sits in [meeting_end, meeting_end + duration].
+  - Must fit entirely within hard limits (7am–10pm); otherwise skipped (no
+    shortened block).
+  - Skipped if a NON-FlowList (manual/external) event occupies the slot. If a
+    FlowList task block is there instead, synthesis wins and task blocks get
+    shuffled by the normal reschedule (synthesis is synced BEFORE task slot
+    assignment, so tasks flow around it via freebusy).
+- Synthesis blocks do NOT count against the 2-work/2-personal daily task cap.
+- Detection runs only on reschedules (folded into schedule_all_tasks): the
+  daily 4am full reschedule covers all meetings; task-triggered runs refresh
+  within their window. No dedicated cron. Full-reschedule synthesis lookahead
+  is capped at 14 days (meetings further out are too volatile).
+- Reconciliation is idempotent per source meeting (source_google_event_id):
+  unchanged blocks are left alone, moved meetings get their block moved,
+  meetings that stop qualifying get their block removed. Avoids event churn.
+
 ## Procrastination Watchdog
 - Background job checks daily for tasks unscheduled or incomplete for 14+ days
 - Surfaces these in a dedicated UI widget
@@ -215,6 +243,14 @@ a banner or aggressive highlight.
 - Cloudflare Tunnel: cloudflared container in docker-compose using token from env
 - Caddy: trusted_proxies for Cloudflare IPs; HSTS; CSP; forwards CF-Connecting-IP
 - security.txt at /security.txt (served from frontend/public/)
+- Synthesis time: 15-min buffer auto-created after multi-person meetings
+  (migration 0013). calendar_blocks extended with block_type ('task'|
+  'synthesis'), nullable task_id, direct user_id, and source_google_event_id.
+  Synthesis blocks live in calendar_blocks (single ownership source of truth
+  for the "only delete events we created" guard). Pure logic in
+  services/synthesis.py (is_multiperson_meeting, compute_synthesis_window);
+  sync in scheduler_service._sync_synthesis_blocks; user settings
+  synthesis_enabled / synthesis_duration_minutes / synthesis_self_emails.
 - Overdue handling: ReviewPromptBanner and review-prompts API removed;
   overdue/missed blocks handled entirely via in-card flow in TaskRow
   (gray clock icon + Reschedule / "I Have More Work To Do" buttons).

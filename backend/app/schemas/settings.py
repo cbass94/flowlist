@@ -35,6 +35,10 @@ class UserSettings(BaseModel):
     personal_saturday_end_time: Optional[time] = None
     personal_sunday_start_time: Optional[time] = None
     personal_sunday_end_time: Optional[time] = None
+    # Synthesis time (post-meeting buffer)
+    synthesis_enabled: bool = True
+    synthesis_duration_minutes: int = 15
+    synthesis_self_emails: Optional[str] = None
 
 
 class UpdateSettings(BaseModel):
@@ -58,3 +62,7 @@ class UpdateSettings(BaseModel):
     personal_saturday_end_time: Optional[time] = None
     personal_sunday_start_time: Optional[time] = None
     personal_sunday_end_time: Optional[time] = None
+    # Synthesis time (post-meeting buffer)
+    synthesis_enabled: Optional[bool] = None
+    synthesis_duration_minutes: Optional[int] = Field(default=None, ge=5, le=120)
+    synthesis_self_emails: Optional[str] = Field(default=None, max_length=2000)

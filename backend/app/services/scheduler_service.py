@@ -44,8 +44,8 @@ from app.models.scheduling_run_log import ScheduleTrigger
 from app.models.task import Task, TaskStatus
 from app.models.user import User
 from app.repositories import calendar_block_repo, scheduling_log_repo, task_repo
-from app.services import calendar_service
-from app.services.slot_finder import SlotFinderConfig, split_into_blocks
+from app.services import calendar_service, synthesis
+from app.services.slot_finder import SlotFinderConfig, merge_intervals, split_into_blocks
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +55,10 @@ _DAILY_PERSONAL_CAP = 2
 
 # How many future days to scan before giving up on placing a block
 _MAX_SCAN_DAYS = 60
+
+# How far ahead a full reschedule looks for meetings needing synthesis blocks.
+# Meetings further out are too volatile to pre-book against.
+_SYNTHESIS_LOOKAHEAD_DAYS = 14
 
 # Triggers that only reschedule the next 72 hours instead of all future blocks
 _WINDOWED_TRIGGERS = {ScheduleTrigger.priority_change}
@@ -136,9 +140,25 @@ async def schedule_all_tasks(
             await db.commit()
             return
 
-        # ── Step 2: clear future FlowList blocks in window ──────────────────
+        # ── Step 2: clear future FlowList task blocks in window ─────────────
         blocks_to_delete = await _clear_future_blocks(db, user, now, horizon)
         blocks_deleted = len(blocks_to_delete)
+        # Persist the clear before syncing synthesis, so the synthesis error
+        # handler's rollback can never discard these (already-executed) deletes.
+        await db.commit()
+
+        # ── Step 2b: sync synthesis blocks after multi-person meetings ──────
+        # Runs before slot assignment so synthesis blocks show up as busy in the
+        # freebusy scan and task blocks flow around them. Isolated so a calendar
+        # hiccup here never breaks task scheduling.
+        try:
+            await _sync_synthesis_blocks(db, user, now, horizon)
+        except Exception as exc:
+            log.warning(
+                "schedule_all_tasks: synthesis sync failed for user %d: %s",
+                user.id, exc,
+            )
+            await db.rollback()
 
         # ── Step 3: assign slots ─────────────────────────────────────────────
         config = SlotFinderConfig(
@@ -261,6 +281,165 @@ async def _clear_future_blocks(
             )
 
     return deleted
+
+
+async def _sync_synthesis_blocks(
+    db: AsyncSession,
+    user: User,
+    scan_from: datetime,
+    horizon: datetime | None,
+) -> int:
+    """
+    Reconcile "Synthesis time" blocks against the user's current meetings.
+
+    For every meeting in the window that includes someone other than the user
+    (and isn't declined/all-day/cancelled), ensure a 15-min synthesis block sits
+    immediately after it — as long as it fits inside the hard day limits and the
+    slot isn't occupied by a non-FlowList event. Reconciliation is idempotent:
+    unchanged blocks are left alone, moved meetings get their block moved,
+    meetings that no longer qualify get their block removed.
+
+    Returns the number of synthesis blocks created (for logging).
+    """
+    window_end = (
+        horizon if horizon is not None
+        else scan_from + timedelta(days=_SYNTHESIS_LOOKAHEAD_DAYS)
+    )
+
+    # Existing synthesis blocks in this window, keyed by their source meeting.
+    existing = await calendar_block_repo.get_active_synthesis_blocks_in_range(
+        db, user.id, scan_from, window_end
+    )
+    existing_by_source: dict[str, "calendar_block_repo.CalendarBlock"] = {
+        b.source_google_event_id: b for b in existing if b.source_google_event_id
+    }
+
+    # Feature toggle off → tear down any existing synthesis blocks and stop.
+    if not user.synthesis_enabled:
+        for block in existing_by_source.values():
+            await _delete_synthesis_block(db, user, block)
+        return 0
+
+    # Which calendars to scan / write to. Work account can read both calendars.
+    work_cal = user.work_calendar_id or settings.work_calendar_id
+    personal_cal = user.personal_calendar_id or settings.personal_calendar_id
+    calendars: list[tuple[str, Literal["work", "personal"]]] = [(work_cal, "work")]
+    if personal_cal and personal_cal != work_cal:
+        personal_account: Literal["work", "personal"] = (
+            "personal" if user.personal_google_id else "work"
+        )
+        calendars.append((personal_cal, personal_account))
+
+    # Gather events across all calendars, tagging each with where a synthesis
+    # block for it would be written.
+    all_events: list[dict] = []
+    for cal_id, create_account in calendars:
+        events = await calendar_service.get_events_with_attendees(
+            user, db, cal_id, "work", scan_from, window_end
+        )
+        for ev in events:
+            ev["_calendar_id"] = cal_id
+            ev["_create_account"] = create_account
+            all_events.append(ev)
+
+    # External busy = non-FlowList, timed, non-cancelled, non-transparent events
+    # across BOTH calendars. FlowList task blocks are deliberately excluded so
+    # they get shuffled out of the way rather than blocking a synthesis buffer.
+    external_busy = merge_intervals([
+        (ev["start_dt"], ev["end_dt"])
+        for ev in all_events
+        if not ev["is_flowlist"]
+        and not ev["is_all_day"]
+        and ev["start_dt"] is not None
+        and ev["end_dt"] is not None
+        and ev["status"] != "cancelled"
+        and ev.get("transparency") != "transparent"
+    ])
+
+    self_emails = user.synthesis_self_email_set
+    duration = user.synthesis_duration_minutes or 15
+
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    try:
+        user_tz = ZoneInfo(user.timezone or "UTC")
+    except (ZoneInfoNotFoundError, KeyError):
+        user_tz = ZoneInfo("UTC")
+
+    # Desired synthesis blocks: source_event_id → (start, end, calendar_id, account)
+    desired: dict[str, tuple[datetime, datetime, str, str]] = {}
+    for ev in all_events:
+        source_id = ev["id"]
+        if not source_id:
+            continue
+        if not synthesis.is_multiperson_meeting(ev, self_emails):
+            continue
+        end_dt = ev["end_dt"]
+        if end_dt is None or end_dt <= scan_from:
+            continue  # only place synthesis after meetings that end in the future
+        win = synthesis.compute_synthesis_window(
+            end_dt, duration, user.hard_start_hour, user.hard_end_hour,
+            external_busy, user_tz,
+        )
+        if win is None:
+            continue
+        desired[source_id] = (win[0], win[1], ev["_calendar_id"], ev["_create_account"])
+
+    created = 0
+
+    # Create new blocks / move blocks whose meeting shifted.
+    for source_id, (start_at, end_at, cal_id, account) in desired.items():
+        block = existing_by_source.get(source_id)
+        if (
+            block is not None
+            and block.start_at == start_at
+            and block.end_at == end_at
+            and block.calendar_id == cal_id
+        ):
+            continue  # unchanged — leave the existing event alone
+        if block is not None:
+            await _delete_synthesis_block(db, user, block)
+        await calendar_service.create_synthesis_block(
+            user=user,
+            db=db,
+            calendar_id=cal_id,
+            account=account,  # type: ignore[arg-type]
+            start_time=start_at,
+            end_time=end_at,
+            source_google_event_id=source_id,
+        )
+        await db.commit()
+        created += 1
+
+    # Remove synthesis blocks whose meeting no longer qualifies (cancelled,
+    # moved out of window, lost its other attendees, now conflicting, etc.).
+    for source_id, block in existing_by_source.items():
+        if source_id not in desired:
+            await _delete_synthesis_block(db, user, block)
+
+    if created or existing_by_source:
+        log.info(
+            "_sync_synthesis_blocks: user=%d created=%d existing=%d desired=%d",
+            user.id, created, len(existing_by_source), len(desired),
+        )
+    return created
+
+
+async def _delete_synthesis_block(db: AsyncSession, user: User, block) -> None:
+    """Delete a synthesis block from GCal + soft-delete its row, then commit."""
+    try:
+        await calendar_service.delete_calendar_block(
+            user=user,
+            db=db,
+            calendar_id=block.calendar_id,
+            account=block.account,
+            google_event_id=block.google_event_id,
+        )
+        await db.commit()
+    except Exception as exc:
+        log.warning(
+            "_delete_synthesis_block: could not delete %s: %s",
+            block.google_event_id, exc,
+        )
 
 
 async def _assign_slots(

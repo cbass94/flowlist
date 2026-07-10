@@ -44,6 +44,9 @@ def _user_to_settings(user: User) -> UserSettings:
         personal_saturday_end_time=user.personal_saturday_end_time,
         personal_sunday_start_time=user.personal_sunday_start_time,
         personal_sunday_end_time=user.personal_sunday_end_time,
+        synthesis_enabled=user.synthesis_enabled,
+        synthesis_duration_minutes=user.synthesis_duration_minutes,
+        synthesis_self_emails=user.synthesis_self_emails,
     )
 
 

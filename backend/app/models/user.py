@@ -56,6 +56,17 @@ class User(Base):
     personal_sunday_start_time = Column(Time, nullable=True)
     personal_sunday_end_time = Column(Time, nullable=True)
 
+    # Synthesis time: 15-min buffer auto-created after multi-person meetings
+    synthesis_enabled = Column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    synthesis_duration_minutes = Column(
+        Integer, nullable=False, default=15, server_default="15"
+    )
+    # Comma-separated list of email addresses that count as "me" — a meeting
+    # only qualifies for synthesis if it has an attendee outside this set.
+    synthesis_self_emails = Column(Text, nullable=True)
+
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -74,3 +85,21 @@ class User(Base):
     @property
     def personal_account_connected(self) -> bool:
         return self.personal_google_id is not None
+
+    @property
+    def synthesis_self_email_set(self) -> set[str]:
+        """
+        Lowercased set of email addresses that represent the user. A meeting
+        needs at least one attendee outside this set to earn a synthesis block.
+        Always includes the primary login email; extended by
+        synthesis_self_emails (comma-separated).
+        """
+        emails: set[str] = set()
+        if self.email:
+            emails.add(self.email.strip().lower())
+        if self.synthesis_self_emails:
+            for raw in self.synthesis_self_emails.split(","):
+                cleaned = raw.strip().lower()
+                if cleaned:
+                    emails.add(cleaned)
+        return emails

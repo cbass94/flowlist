@@ -204,7 +204,165 @@ def _parse_event(event: dict) -> dict[str, Any]:
     }
 
 
+def _parse_event_datetime(node: dict) -> datetime | None:
+    """Parse a Google event start/end node into a UTC-aware datetime.
+
+    Returns None for all-day events (which use `date`, not `dateTime`).
+    """
+    raw = node.get("dateTime")
+    if not raw:
+        return None
+    parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _parse_synthesis_event(event: dict) -> dict[str, Any]:
+    """
+    Normalize a Google Calendar event into the shape the synthesis logic needs
+    (see app.services.synthesis). Includes attendees, timing, and whether the
+    event is one FlowList created.
+    """
+    start_raw = event.get("start", {})
+    end_raw = event.get("end", {})
+    is_all_day = "date" in start_raw and "dateTime" not in start_raw
+
+    attendees = [
+        {
+            "email": att.get("email", ""),
+            "self": bool(att.get("self", False)),
+            "responseStatus": att.get("responseStatus"),
+            "resource": bool(att.get("resource", False)),
+        }
+        for att in event.get("attendees", [])
+    ]
+
+    is_flowlist = (
+        event.get("extendedProperties", {}).get("private", {}).get("flowlist") == "true"
+        or FLOWLIST_TAG in event.get("description", "")
+    )
+
+    return {
+        "id": event.get("id"),
+        "summary": event.get("summary", ""),
+        "start_dt": _parse_event_datetime(start_raw),
+        "end_dt": _parse_event_datetime(end_raw),
+        "is_all_day": is_all_day,
+        "status": event.get("status"),
+        "event_type": event.get("eventType"),
+        "attendees": attendees,
+        "is_flowlist": is_flowlist,
+        "transparency": event.get("transparency"),
+    }
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
+
+
+async def get_events_with_attendees(
+    user: User,
+    db: AsyncSession,
+    calendar_id: str,
+    account: AccountType,
+    start_dt: datetime,
+    end_dt: datetime,
+) -> list[dict[str, Any]]:
+    """
+    Fetch events from a calendar in [start_dt, end_dt], normalized for the
+    synthesis logic (attendees, timing, FlowList ownership).
+
+    Uses events().list (not freebusy) because we need attendee data to decide
+    whether a meeting includes anyone other than the user.
+    """
+    creds = await _get_valid_credentials(user, account, db)
+
+    def _fetch() -> list[dict]:
+        service = _build_service(creds)
+        events: list[dict] = []
+        page_token = None
+        while True:
+            result = (
+                service.events()
+                .list(
+                    calendarId=calendar_id,
+                    timeMin=start_dt.isoformat(),
+                    timeMax=end_dt.isoformat(),
+                    singleEvents=True,
+                    orderBy="startTime",
+                    pageToken=page_token,
+                )
+                .execute()
+            )
+            events.extend(result.get("items", []))
+            page_token = result.get("nextPageToken")
+            if not page_token:
+                break
+        return events
+
+    raw_events = await asyncio.to_thread(_fetch)
+    return [_parse_synthesis_event(e) for e in raw_events]
+
+
+async def create_synthesis_block(
+    user: User,
+    db: AsyncSession,
+    calendar_id: str,
+    account: AccountType,
+    start_time: datetime,
+    end_time: datetime,
+    source_google_event_id: str,
+) -> CalendarBlock:
+    """
+    Create a "Synthesis time" Google Calendar event immediately after a meeting
+    and record it in calendar_blocks as a synthesis block.
+
+    Tagged like every FlowList event ([FlowList] + extendedProperties) so the
+    ownership guard protects it, plus a `synthesis` marker and the source
+    meeting's event ID for idempotent reconciliation.
+    """
+    creds = await _get_valid_credentials(user, account, db)
+    event_body = {
+        "summary": "Synthesis time",
+        "description": (
+            "Time to synthesize what came out of your last meeting before "
+            "moving on.\n\n---\n" + f"{FLOWLIST_TAG} synthesis"
+        ),
+        "start": {"dateTime": start_time.isoformat(), "timeZone": "UTC"},
+        "end": {"dateTime": end_time.isoformat(), "timeZone": "UTC"},
+        "extendedProperties": {
+            "private": {
+                "flowlist": "true",
+                "synthesis": "true",
+                "source_event_id": source_google_event_id,
+            }
+        },
+        "source": {
+            "title": "FlowList",
+            "url": settings.app_base_url,
+        },
+    }
+
+    def _insert() -> str:
+        service = _build_service(creds)
+        created = service.events().insert(calendarId=calendar_id, body=event_body).execute()
+        return created["id"]
+
+    google_event_id = await asyncio.to_thread(_insert)
+
+    block = await calendar_block_repo.create(
+        db,
+        task_id=None,
+        user_id=user.id,
+        block_type="synthesis",
+        source_google_event_id=source_google_event_id,
+        google_event_id=google_event_id,
+        calendar_id=calendar_id,
+        account=account,
+        start_at=start_time,
+        end_at=end_time,
+    )
+    return block
 
 
 async def get_calendar_events(
@@ -279,6 +437,8 @@ async def create_calendar_block(
     block = await calendar_block_repo.create(
         db,
         task_id=task.id,
+        user_id=user.id,
+        block_type="task",
         google_event_id=google_event_id,
         calendar_id=calendar_id,
         account=account,

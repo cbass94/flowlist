@@ -641,6 +641,82 @@ export function SettingsPage() {
         </div>
       </section>
 
+      {/* Synthesis time */}
+      <section className={sectionCls}>
+        <div className="px-5 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="font-semibold text-gray-800 dark:text-gray-100 text-sm">Synthesis Time</h2>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                Auto-book a short buffer right after any meeting that includes
+                someone other than you — time to synthesize before moving on.
+              </p>
+            </div>
+            <button
+              role="switch"
+              aria-checked={settings.synthesis_enabled}
+              onClick={() => save({ synthesis_enabled: !settings.synthesis_enabled })}
+              className={`relative inline-flex w-10 h-5 rounded-full transition-colors shrink-0 ${
+                settings.synthesis_enabled ? "bg-gray-900 dark:bg-gray-100" : "bg-gray-200 dark:bg-gray-700"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform ${
+                  settings.synthesis_enabled ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+        {settings.synthesis_enabled && (
+          <div className="px-5 py-4 space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <label className="text-sm text-gray-600 dark:text-gray-300 flex-1">
+                Buffer length
+              </label>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={5}
+                  max={120}
+                  step={5}
+                  defaultValue={settings.synthesis_duration_minutes}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (!isNaN(v) && v >= 5 && v !== settings.synthesis_duration_minutes) {
+                      save({ synthesis_duration_minutes: v });
+                    }
+                  }}
+                  className={`${inputCls} w-16 text-center`}
+                />
+                <span className="text-xs text-gray-400 dark:text-gray-500">min</span>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm text-gray-600 dark:text-gray-300">
+                Emails that count as “me”
+              </label>
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                Comma-separated. A meeting only earns a synthesis block if it has
+                an attendee outside this list. Your login email is always included.
+              </p>
+              <input
+                type="text"
+                defaultValue={settings.synthesis_self_emails ?? ""}
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v !== (settings.synthesis_self_emails ?? "")) {
+                    save({ synthesis_self_emails: v });
+                  }
+                }}
+                placeholder="me@work.com, me@gmail.com"
+                className={`${inputCls} w-full`}
+              />
+            </div>
+          </div>
+        )}
+      </section>
+
       {/* Calendars */}
       <section className={sectionCls}>
         <div className="px-5 py-4">

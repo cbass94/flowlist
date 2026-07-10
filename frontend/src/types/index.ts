@@ -195,6 +195,9 @@ export interface UserSettings {
   personal_saturday_end_time: string | null;
   personal_sunday_start_time: string | null;
   personal_sunday_end_time: string | null;
+  synthesis_enabled: boolean;
+  synthesis_duration_minutes: number;
+  synthesis_self_emails: string | null;
 }
 
 export interface CalendarItem {

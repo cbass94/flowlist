@@ -119,15 +119,21 @@ async def get_active_blocks_in_range(
 
 async def create(
     session: AsyncSession,
-    task_id: int,
+    task_id: int | None,
     google_event_id: str,
     calendar_id: str,
     account: str,
     start_at: datetime,
     end_at: datetime,
+    user_id: int | None = None,
+    block_type: str = "task",
+    source_google_event_id: str | None = None,
 ) -> CalendarBlock:
     block = CalendarBlock(
         task_id=task_id,
+        user_id=user_id,
+        block_type=block_type,
+        source_google_event_id=source_google_event_id,
         google_event_id=google_event_id,
         calendar_id=calendar_id,
         account=account,
@@ -137,6 +143,30 @@ async def create(
     session.add(block)
     await session.flush()
     return block
+
+
+async def get_active_synthesis_blocks_in_range(
+    session: AsyncSession,
+    user_id: int,
+    start: datetime,
+    end: datetime,
+) -> list[CalendarBlock]:
+    """
+    Non-deleted synthesis blocks for a user whose start falls in [start, end).
+    Used by the scheduler to reconcile synthesis blocks against current meetings.
+    """
+    result = await session.execute(
+        select(CalendarBlock)
+        .where(
+            CalendarBlock.user_id == user_id,
+            CalendarBlock.block_type == "synthesis",
+            CalendarBlock.is_deleted.is_(False),
+            CalendarBlock.start_at >= start,
+            CalendarBlock.start_at < end,
+        )
+        .order_by(CalendarBlock.start_at)
+    )
+    return list(result.scalars().all())
 
 
 async def soft_delete(session: AsyncSession, block_id: int) -> bool:

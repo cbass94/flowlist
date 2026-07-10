@@ -31,15 +31,35 @@ class CalendarBlock(Base):
         ),
         # Lookup by Google event ID (e.g., when Google sends a webhook)
         Index("ix_calendar_blocks_google_event_id", "google_event_id", unique=True),
+        # Lookup synthesis blocks by the meeting that spawned them
+        Index("ix_calendar_blocks_source_event", "source_google_event_id"),
     )
 
     id = Column(Integer, primary_key=True)
+    # Task that owns this block. NULL for synthesis blocks (they follow a
+    # meeting, not a task).
     task_id = Column(
         Integer,
         ForeignKey("tasks.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
+    # Direct owner. Always set on new blocks; lets us query a user's synthesis
+    # blocks (which have no task) without a join.
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    # "task" (auto-scheduled backlog block) or "synthesis" (post-meeting buffer)
+    block_type = Column(
+        String(16), nullable=False, default="task", server_default="task"
+    )
+    # For synthesis blocks: the Google event ID of the meeting they follow.
+    # Used to reconcile synthesis blocks idempotently across reschedule runs.
+    source_google_event_id = Column(String(255), nullable=True)
 
     # Google Calendar identifiers
     google_event_id = Column(String(255), nullable=False)

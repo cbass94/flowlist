@@ -123,6 +123,9 @@ async def update_settings(
     personal_saturday_end_time: time | None = None,
     personal_sunday_start_time: time | None = None,
     personal_sunday_end_time: time | None = None,
+    synthesis_enabled: bool | None = None,
+    synthesis_duration_minutes: int | None = None,
+    synthesis_self_emails: str | None = None,
 ) -> User | None:
     """Update user profile and scheduling settings. Only updates provided (non-None) fields."""
     user = await get_by_id(session, user_id)
@@ -160,6 +163,12 @@ async def update_settings(
         user.allow_work_on_weekends = allow_work_on_weekends
     if allow_personal_on_weekends is not None:
         user.allow_personal_on_weekends = allow_personal_on_weekends
+    if synthesis_enabled is not None:
+        user.synthesis_enabled = synthesis_enabled
+    if synthesis_duration_minutes is not None:
+        user.synthesis_duration_minutes = synthesis_duration_minutes
+    if synthesis_self_emails is not None:
+        user.synthesis_self_emails = synthesis_self_emails
     await session.flush()
     return user
 
