@@ -39,6 +39,12 @@ class UserSettings(BaseModel):
     synthesis_enabled: bool = True
     synthesis_duration_minutes: int = 15
     synthesis_self_emails: Optional[str] = None
+    # Calendar color-coding
+    colorize_enabled: bool = False
+    color_purposeful: str = "10"
+    color_necessary: str = "7"
+    color_distracting: str = "11"
+    color_unnecessary: str = "8"
 
 
 class UpdateSettings(BaseModel):
@@ -66,3 +72,9 @@ class UpdateSettings(BaseModel):
     synthesis_enabled: Optional[bool] = None
     synthesis_duration_minutes: Optional[int] = Field(default=None, ge=5, le=120)
     synthesis_self_emails: Optional[str] = Field(default=None, max_length=2000)
+    # Calendar color-coding
+    colorize_enabled: Optional[bool] = None
+    color_purposeful: Optional[str] = Field(default=None, max_length=2)
+    color_necessary: Optional[str] = Field(default=None, max_length=2)
+    color_distracting: Optional[str] = Field(default=None, max_length=2)
+    color_unnecessary: Optional[str] = Field(default=None, max_length=2)

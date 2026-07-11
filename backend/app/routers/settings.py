@@ -47,6 +47,11 @@ def _user_to_settings(user: User) -> UserSettings:
         synthesis_enabled=user.synthesis_enabled,
         synthesis_duration_minutes=user.synthesis_duration_minutes,
         synthesis_self_emails=user.synthesis_self_emails,
+        colorize_enabled=user.colorize_enabled,
+        color_purposeful=user.color_purposeful,
+        color_necessary=user.color_necessary,
+        color_distracting=user.color_distracting,
+        color_unnecessary=user.color_unnecessary,
     )
 
 

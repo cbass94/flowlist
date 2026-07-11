@@ -216,6 +216,26 @@ async def _run_watchdog_for_user(
         )
 
 
+async def colorize_calendars(ctx: dict) -> None:
+    """
+    Hourly calendar color-coding for all users (opt-in per user). Picks up newly
+    added invites without waiting for a reschedule. Cheap in steady state: no AI
+    calls when event signatures are unchanged.
+    """
+    from app.services import colorize_service
+
+    async with AsyncSessionLocal() as db:
+        users = await user_repo.get_all(db)
+        for user in users:
+            if not user.colorize_enabled:
+                continue
+            try:
+                await colorize_service.colorize_user(db, user)
+            except Exception as exc:
+                log.warning("colorize_calendars: failed for user %d: %s", user.id, exc)
+                await db.rollback()
+
+
 async def daily_full_reschedule(ctx: dict) -> None:
     """
     Daily full reschedule (09:00 UTC ≈ 4am America/Chicago). Re-optimises the
@@ -258,6 +278,8 @@ class WorkerSettings:
         # Full reschedule: daily at 09:00 UTC (~4am America/Chicago) — overnight
         # so it never shifts upcoming blocks while the user is mid-day.
         cron(daily_full_reschedule, hour=9, minute=0),
+        # Calendar color-coding: hourly, to catch newly-added invites.
+        cron(colorize_calendars, minute=0),
     ]
 
     on_startup = startup

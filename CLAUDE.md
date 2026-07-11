@@ -138,6 +138,31 @@ a banner or aggressive highlight.
   unchanged blocks are left alone, moved meetings get their block moved,
   meetings that stop qualifying get their block removed. Avoids event churn.
 
+## Calendar Color-Coding
+- AI classifies each upcoming timed event into one of four productivity buckets
+  (a 2x2 of Productive/Unproductive x Attractive/Unattractive) and sets the
+  Google Calendar event color to match:
+  - Purposeful (productive + attractive) → Basil green (colorId 10)
+  - Necessary (productive + unattractive) → Peacock blue (colorId 7)
+  - Distracting (unproductive + attractive) → Tomato red (colorId 11)
+  - Unnecessary (unproductive + unattractive) → Graphite gray (colorId 8)
+  Colors are user-configurable per bucket in Settings.
+- Opt-in: colorize_enabled defaults FALSE; user turns it on in Settings.
+- Scope: all timed events (both calendars), including FlowList's own task/
+  synthesis blocks. Skips all-day, cancelled, and declined events.
+- v1 is AI auto-classify only (rules-based mapping deferred to a later version).
+- Respects manual colors: FlowList tracks what it colored (event_colors table).
+  If the user changes a color by hand, FlowList cedes control of that event.
+  Pre-existing manual colors are never overwritten.
+- Classification is cached by a content signature (title+attendees+description+
+  start); unchanged events are never re-sent to Claude. AI failure → nothing is
+  recolored that run (never wipe on error).
+- Cadence: hourly cron (colorize_calendars) to catch new invites + folded into
+  schedule_all_tasks (runs on every reschedule + daily full). 14-day lookahead.
+- This is the only feature that mutates events FlowList did NOT create; it writes
+  ONLY the colorId field, guarded by the event_colors table + colorize.decide_action
+  (NOT the calendar_blocks ownership guard).
+
 ## Procrastination Watchdog
 - Background job checks daily for tasks unscheduled or incomplete for 14+ days
 - Surfaces these in a dedicated UI widget
@@ -243,6 +268,16 @@ a banner or aggressive highlight.
 - Cloudflare Tunnel: cloudflared container in docker-compose using token from env
 - Caddy: trusted_proxies for Cloudflare IPs; HSTS; CSP; forwards CF-Connecting-IP
 - security.txt at /security.txt (served from frontend/public/)
+- Calendar color-coding: AI sorts events into 4 productivity buckets and sets
+  Google event colorId (migration 0014). event_colors table caches
+  classifications + tracks app-owned colors (respects manual edits). Pure logic
+  in services/colorize.py (is_colorable, content_signature, decide_action);
+  orchestration in services/colorize_service.py; batch classifier
+  ai_service.classify_events (forced tool-use, prompt event_classify.md);
+  calendar_service.patch_event_color writes colorId on events the app doesn't
+  own. Opt-in (colorize_enabled default false); hourly cron colorize_calendars
+  + folded into schedule_all_tasks. User settings colorize_enabled +
+  color_{purposeful,necessary,distracting,unnecessary}.
 - Synthesis time: 15-min buffer auto-created after multi-person meetings
   (migration 0013). calendar_blocks extended with block_type ('task'|
   'synthesis'), nullable task_id, direct user_id, and source_google_event_id.

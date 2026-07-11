@@ -126,6 +126,11 @@ async def update_settings(
     synthesis_enabled: bool | None = None,
     synthesis_duration_minutes: int | None = None,
     synthesis_self_emails: str | None = None,
+    colorize_enabled: bool | None = None,
+    color_purposeful: str | None = None,
+    color_necessary: str | None = None,
+    color_distracting: str | None = None,
+    color_unnecessary: str | None = None,
 ) -> User | None:
     """Update user profile and scheduling settings. Only updates provided (non-None) fields."""
     user = await get_by_id(session, user_id)
@@ -169,6 +174,16 @@ async def update_settings(
         user.synthesis_duration_minutes = synthesis_duration_minutes
     if synthesis_self_emails is not None:
         user.synthesis_self_emails = synthesis_self_emails
+    if colorize_enabled is not None:
+        user.colorize_enabled = colorize_enabled
+    if color_purposeful is not None:
+        user.color_purposeful = color_purposeful
+    if color_necessary is not None:
+        user.color_necessary = color_necessary
+    if color_distracting is not None:
+        user.color_distracting = color_distracting
+    if color_unnecessary is not None:
+        user.color_unnecessary = color_unnecessary
     await session.flush()
     return user
 

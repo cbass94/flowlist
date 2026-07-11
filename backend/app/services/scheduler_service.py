@@ -44,7 +44,7 @@ from app.models.scheduling_run_log import ScheduleTrigger
 from app.models.task import Task, TaskStatus
 from app.models.user import User
 from app.repositories import calendar_block_repo, scheduling_log_repo, task_repo
-from app.services import calendar_service, synthesis
+from app.services import calendar_service, colorize_service, synthesis
 from app.services.slot_finder import SlotFinderConfig, merge_intervals, split_into_blocks
 
 log = logging.getLogger(__name__)
@@ -190,6 +190,17 @@ async def schedule_all_tasks(
             config=config,
         )
         blocks_created = new_blocks
+
+        # ── Step 3b: color-code the calendar (opt-in) ───────────────────────
+        # Runs after blocks are created so new task/synthesis blocks get colored
+        # in the same pass. Isolated so a coloring failure never breaks the run.
+        try:
+            await colorize_service.colorize_user(db, user)
+        except Exception as exc:
+            log.warning(
+                "schedule_all_tasks: colorize failed for user %d: %s", user.id, exc
+            )
+            await db.rollback()
 
         # ── Step 4: complete run log ─────────────────────────────────────────
         duration_ms = int((time.monotonic() - started_at) * 1000)

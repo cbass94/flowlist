@@ -246,6 +246,7 @@ def _parse_synthesis_event(event: dict) -> dict[str, Any]:
     return {
         "id": event.get("id"),
         "summary": event.get("summary", ""),
+        "description": event.get("description", ""),
         "start_dt": _parse_event_datetime(start_raw),
         "end_dt": _parse_event_datetime(end_raw),
         "is_all_day": is_all_day,
@@ -254,6 +255,8 @@ def _parse_synthesis_event(event: dict) -> dict[str, Any]:
         "attendees": attendees,
         "is_flowlist": is_flowlist,
         "transparency": event.get("transparency"),
+        # Current per-user event color (None = default/uncolored)
+        "color_id": event.get("colorId"),
     }
 
 
@@ -363,6 +366,47 @@ async def create_synthesis_block(
         end_at=end_time,
     )
     return block
+
+
+async def patch_event_color(
+    user: User,
+    db: AsyncSession,
+    calendar_id: str,
+    account: AccountType,
+    google_event_id: str,
+    color_id: str,
+) -> None:
+    """
+    Set the Google Calendar colorId on an event.
+
+    Unlike create/delete of FlowList blocks, this intentionally patches events
+    FlowList did NOT create (e.g. received invites). It only ever writes the
+    single `colorId` field. The safety layer for "which events we may recolor"
+    lives in the event_colors table + colorize.decide_action, not the
+    calendar_blocks ownership guard.
+
+    Silently ignores 404/410 (event gone).
+    """
+    creds = await _get_valid_credentials(user, account, db)
+
+    def _patch() -> None:
+        service = _build_service(creds)
+        try:
+            service.events().patch(
+                calendarId=calendar_id,
+                eventId=google_event_id,
+                body={"colorId": color_id},
+            ).execute()
+        except HttpError as exc:
+            if exc.resp.status in (404, 410):
+                log.info(
+                    "patch_event_color: event %s gone (%s) — skipping",
+                    google_event_id, exc.resp.status,
+                )
+                return
+            raise
+
+    await asyncio.to_thread(_patch)
 
 
 async def get_calendar_events(

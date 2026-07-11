@@ -46,6 +46,7 @@ _TMPL_CALIBRATION = _load_template("calibration_context.md")
 _TMPL_USER_ESTIMATE = _load_template("user_estimate_hint.md")
 _TMPL_ASSISTANT = _load_template("task_assistant.md")
 _TMPL_ASSISTANT_FEEDBACK = _load_template("assistant_feedback_context.md")
+_TMPL_EVENT_CLASSIFY = _load_template("event_classify.md")
 
 # ── Claude tool definition ────────────────────────────────────────────────────
 # Forced tool-use means Claude MUST respond in this exact schema.
@@ -645,3 +646,101 @@ async def record_task_completion(
     """
     from app.repositories import ai_log_repo
     await ai_log_repo.record_actual(db, task_id, actual_minutes)
+
+
+# ── Event color classification ────────────────────────────────────────────────
+# Batch-classify calendar events into the four productivity buckets. Forced
+# tool-use guarantees one bucket per event, in order.
+
+from app.services.colorize import BUCKETS as _COLOR_BUCKETS  # noqa: E402
+
+_MAX_CLASSIFY_BATCH = 25
+
+_EVENT_CLASSIFY_TOOL: dict = {
+    "name": "classify_events",
+    "description": (
+        "Submit the productivity bucket for every calendar event, one per index."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "classifications": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "index": {"type": "integer"},
+                        "bucket": {"type": "string", "enum": list(_COLOR_BUCKETS)},
+                    },
+                    "required": ["index", "bucket"],
+                },
+            }
+        },
+        "required": ["classifications"],
+    },
+}
+
+
+def _format_events_block(events: list[dict]) -> str:
+    """Render events (with local index) for the classification prompt."""
+    lines: list[str] = []
+    for i, ev in enumerate(events):
+        attendees = ev.get("attendees") or []
+        names = ", ".join(
+            (a.get("email") or "") for a in attendees if not a.get("resource")
+        )[:300]
+        desc = (ev.get("description") or "").strip().replace("\n", " ")[:200]
+        lines.append(
+            f"[{i}] title: {ev.get('summary') or '(no title)'}"
+            f" | attendees: {names or 'none'}"
+            + (f" | description: {desc}" if desc else "")
+        )
+    return "\n".join(lines)
+
+
+async def _classify_batch(events: list[dict]) -> list[str | None]:
+    """Classify a single batch (<= _MAX_CLASSIFY_BATCH). Raises on API error."""
+    prompt = _TMPL_EVENT_CLASSIFY.format(events_block=_format_events_block(events))
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    response = await client.messages.create(
+        model=settings.anthropic_model,
+        max_tokens=1024,
+        tools=[_EVENT_CLASSIFY_TOOL],
+        tool_choice={"type": "tool", "name": "classify_events"},
+        messages=[{"role": "user", "content": prompt}],
+    )
+    tool_block = next((b for b in response.content if b.type == "tool_use"), None)
+    if tool_block is None:
+        raise ValueError("Claude response contained no tool_use block")
+
+    result: list[str | None] = [None] * len(events)
+    for item in tool_block.input.get("classifications", []):
+        idx = item.get("index")
+        bucket = item.get("bucket")
+        if isinstance(idx, int) and 0 <= idx < len(events) and bucket in _COLOR_BUCKETS:
+            result[idx] = bucket
+    return result
+
+
+async def classify_events(events: list[dict]) -> list[str | None]:
+    """
+    Classify events into productivity buckets, returning a list aligned with the
+    input (None where Claude gave no/invalid answer).
+
+    Graceful degradation: on any Anthropic API error, returns all-None so the
+    caller changes no colors this run (never wipe on failure).
+    """
+    if not events:
+        return []
+    out: list[str | None] = []
+    try:
+        for start in range(0, len(events), _MAX_CLASSIFY_BATCH):
+            batch = events[start:start + _MAX_CLASSIFY_BATCH]
+            out.extend(await _classify_batch(batch))
+        return out
+    except anthropic.APIError as exc:
+        log.warning("classify_events: Anthropic API error, skipping coloring: %s", exc)
+        return [None] * len(events)
+    except Exception as exc:
+        log.exception("classify_events: unexpected error, skipping coloring: %s", exc)
+        return [None] * len(events)

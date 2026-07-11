@@ -67,6 +67,15 @@ class User(Base):
     # only qualifies for synthesis if it has an attendee outside this set.
     synthesis_self_emails = Column(Text, nullable=True)
 
+    # AI calendar color-coding (opt-in). Each bucket maps to a Google colorId.
+    colorize_enabled = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    color_purposeful = Column(String(2), nullable=False, default="10", server_default="10")
+    color_necessary = Column(String(2), nullable=False, default="7", server_default="7")
+    color_distracting = Column(String(2), nullable=False, default="11", server_default="11")
+    color_unnecessary = Column(String(2), nullable=False, default="8", server_default="8")
+
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -103,3 +112,13 @@ class User(Base):
                 if cleaned:
                     emails.add(cleaned)
         return emails
+
+    @property
+    def bucket_color_map(self) -> dict[str, str]:
+        """Map each productivity bucket to the user's chosen Google colorId."""
+        return {
+            "purposeful": self.color_purposeful,
+            "necessary": self.color_necessary,
+            "distracting": self.color_distracting,
+            "unnecessary": self.color_unnecessary,
+        }

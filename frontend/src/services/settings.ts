@@ -24,6 +24,11 @@ export interface UpdateSettings {
   synthesis_enabled?: boolean;
   synthesis_duration_minutes?: number;
   synthesis_self_emails?: string | null;
+  colorize_enabled?: boolean;
+  color_purposeful?: string;
+  color_necessary?: string;
+  color_distracting?: string;
+  color_unnecessary?: string;
 }
 
 export const settingsApi = {

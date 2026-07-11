@@ -30,6 +30,60 @@ const DEFAULT_END = "17:00:00";
 
 const inputCls = "text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/20 focus-visible:border-blue-300 dark:focus-visible:border-blue-500 transition-colors";
 
+// Google Calendar's fixed event-color palette (colorId → name + hex swatch)
+const GOOGLE_COLORS: { id: string; name: string; hex: string }[] = [
+  { id: "1", name: "Lavender", hex: "#7986cb" },
+  { id: "2", name: "Sage", hex: "#33b679" },
+  { id: "3", name: "Grape", hex: "#8e24aa" },
+  { id: "4", name: "Flamingo", hex: "#e67c73" },
+  { id: "5", name: "Banana", hex: "#f6bf26" },
+  { id: "6", name: "Tangerine", hex: "#f4511e" },
+  { id: "7", name: "Peacock", hex: "#039be5" },
+  { id: "8", name: "Graphite", hex: "#616161" },
+  { id: "9", name: "Blueberry", hex: "#3f51b5" },
+  { id: "10", name: "Basil", hex: "#0b8043" },
+  { id: "11", name: "Tomato", hex: "#d50000" },
+];
+
+function ColorSelect({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const swatch = GOOGLE_COLORS.find((c) => c.id === value)?.hex ?? "#999";
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="flex-1">
+        <p className="text-sm text-gray-600 dark:text-gray-300">{label}</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">{hint}</p>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <span
+          className="w-4 h-4 rounded-full border border-black/10 dark:border-white/20"
+          style={{ backgroundColor: swatch }}
+        />
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={inputCls}
+        >
+          {GOOGLE_COLORS.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
 function HourSelect({
   label,
   value,
@@ -713,6 +767,64 @@ export function SettingsPage() {
                 className={`${inputCls} w-full`}
               />
             </div>
+          </div>
+        )}
+      </section>
+
+      {/* Calendar color-coding */}
+      <section className={sectionCls}>
+        <div className="px-5 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="font-semibold text-gray-800 dark:text-gray-100 text-sm">Calendar Color-Coding</h2>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                AI sorts your upcoming events into four productivity buckets and
+                colors them on your calendar. Colors you set by hand are left
+                untouched.
+              </p>
+            </div>
+            <button
+              role="switch"
+              aria-checked={settings.colorize_enabled}
+              onClick={() => save({ colorize_enabled: !settings.colorize_enabled })}
+              className={`relative inline-flex w-10 h-5 rounded-full transition-colors shrink-0 ${
+                settings.colorize_enabled ? "bg-gray-900 dark:bg-gray-100" : "bg-gray-200 dark:bg-gray-700"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform ${
+                  settings.colorize_enabled ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+        {settings.colorize_enabled && (
+          <div className="px-5 py-4 space-y-3">
+            <ColorSelect
+              label="Purposeful Work"
+              hint="Productive + engaging"
+              value={settings.color_purposeful}
+              onChange={(id) => save({ color_purposeful: id })}
+            />
+            <ColorSelect
+              label="Necessary Work"
+              hint="Productive but not enjoyable"
+              value={settings.color_necessary}
+              onChange={(id) => save({ color_necessary: id })}
+            />
+            <ColorSelect
+              label="Distracting Work"
+              hint="Enjoyable but low-value"
+              value={settings.color_distracting}
+              onChange={(id) => save({ color_distracting: id })}
+            />
+            <ColorSelect
+              label="Unnecessary Work"
+              hint="Low-value busywork"
+              value={settings.color_unnecessary}
+              onChange={(id) => save({ color_unnecessary: id })}
+            />
           </div>
         )}
       </section>
