@@ -84,18 +84,23 @@ def _parse_redis_url(url: str) -> RedisSettings:
 async def _enqueue_reschedule(
     user_id: int,
     trigger: ScheduleTrigger,
-    debounce: bool = False,
+    debounce: bool = True,
 ) -> None:
+    # Always debounce: store this call's token in Redis and defer the job so
+    # rapid-fire reschedules for the same user collapse to the last one. Without
+    # this, several triggers close together enqueue jobs that ARQ runs
+    # concurrently, and two runs racing through clear-then-recreate produce a
+    # duplicate calendar event for every task. `_defer_by` guarantees every
+    # enqueue has written its token before any job reads it, so only the
+    # last-enqueued token survives and only that job runs. The `debounce`
+    # parameter is retained for compatibility but always applies now.
     try:
         redis_settings = _parse_redis_url(settings.redis_url)
         pool = await create_pool(redis_settings)
         token = f"{trigger.value}:{uuid.uuid4().hex}"
-        if debounce:
-            key = _DEBOUNCE_KEY.format(user_id=user_id)
-            await pool.set(key, token, ex=10)
-            await pool.enqueue_job("reschedule_all", user_id, token, _defer_by=2)
-        else:
-            await pool.enqueue_job("reschedule_all", user_id, token)
+        key = _DEBOUNCE_KEY.format(user_id=user_id)
+        await pool.set(key, token, ex=10)
+        await pool.enqueue_job("reschedule_all", user_id, token, _defer_by=2)
         await pool.aclose()
     except Exception:
         log.warning(
