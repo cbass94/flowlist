@@ -6,12 +6,20 @@
  * swatches below sm. The trailing (i) opens the 2x2 framing the bucket names
  * alone don't convey (Productive/Unproductive x Attractive/Unattractive).
  *
+ * Every swatch tips with Google's own name for its color ("Basil", "Peacock"),
+ * because several of the eleven look alike at this size — the name is what tells
+ * you which one to reach for when recoloring an event in Google Calendar.
+ *
  * Renders nothing when color-coding is off, so the row never sits there empty.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useBucketColors, type ResolvedBucket } from "../hooks/useBucketColors";
+
+function bucketTooltip(bucket: ResolvedBucket): string {
+  return `${bucket.label} — ${bucket.hint} · Google color: ${bucket.colorName}`;
+}
 
 function Swatch({ hex }: { hex: string }) {
   return (
@@ -24,7 +32,7 @@ function Swatch({ hex }: { hex: string }) {
 
 function MatrixCell({ bucket }: { bucket: ResolvedBucket }) {
   return (
-    <div className="flex items-center gap-1.5 min-w-0">
+    <div className="flex items-center gap-1.5 min-w-0" title={bucketTooltip(bucket)}>
       <Swatch hex={bucket.hex} />
       <span className="text-xs text-gray-700 dark:text-gray-200 truncate">
         {bucket.label}
@@ -115,7 +123,7 @@ export function ColorLegend() {
   return (
     <div ref={wrapRef} className="relative flex items-center gap-x-3.5 gap-y-1 px-1 py-1">
       {buckets.map((b) => (
-        <span key={b.key} className="flex items-center gap-1.5" title={b.hint}>
+        <span key={b.key} className="flex items-center gap-1.5" title={bucketTooltip(b)}>
           <Swatch hex={b.hex} />
           <span className="hidden sm:inline text-xs text-gray-600 dark:text-gray-300">
             {b.label}

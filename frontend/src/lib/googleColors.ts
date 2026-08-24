@@ -29,9 +29,21 @@ export const GOOGLE_COLORS: GoogleColor[] = [
 ];
 
 export const FALLBACK_HEX = "#9ca3af";
+export const FALLBACK_COLOR_NAME = "Default";
 
 export function hexForColorId(colorId: string | null | undefined): string {
   return GOOGLE_COLORS.find((c) => c.id === colorId)?.hex ?? FALLBACK_HEX;
+}
+
+/**
+ * Google's own name for a colorId ("Basil", "Peacock", ...).
+ *
+ * Several of the eleven are near-indistinguishable at swatch size, so the name
+ * is what actually tells you which one to pick from Google Calendar's menu when
+ * recoloring an event by hand.
+ */
+export function nameForColorId(colorId: string | null | undefined): string {
+  return GOOGLE_COLORS.find((c) => c.id === colorId)?.name ?? FALLBACK_COLOR_NAME;
 }
 
 export type Bucket = "purposeful" | "necessary" | "distracting" | "unnecessary";

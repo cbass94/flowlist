@@ -13,12 +13,15 @@ import {
   BUCKET_META,
   hexForColorId,
   isBucket,
+  nameForColorId,
   type Bucket,
   type BucketMeta,
 } from "../lib/googleColors";
 
 export interface ResolvedBucket extends BucketMeta {
   hex: string;
+  /** Google's name for this bucket's color, e.g. "Basil". */
+  colorName: string;
 }
 
 export interface BucketColors {
@@ -54,7 +57,14 @@ export function useBucketColors(): BucketColors {
   };
 
   const buckets: ResolvedBucket[] = settings
-    ? BUCKET_META.map((meta) => ({ ...meta, hex: hexForColorId(colorIdFor(meta.key)) }))
+    ? BUCKET_META.map((meta) => {
+        const colorId = colorIdFor(meta.key);
+        return {
+          ...meta,
+          hex: hexForColorId(colorId),
+          colorName: nameForColorId(colorId),
+        };
+      })
     : [];
 
   const hexFor = (bucket: string | null | undefined): string | null => {
