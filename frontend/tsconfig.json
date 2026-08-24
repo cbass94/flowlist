@@ -10,6 +10,11 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
+    // Vite does the transpiling; tsc is only a type checker here. Without this,
+    // tsc emits a .js next to every .ts/.tsx in src/ and Vite's resolver — which
+    // tries .js before .ts — silently serves that stale output instead of the
+    // source. Do not remove.
+    "noEmit": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]

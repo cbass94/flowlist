@@ -16,6 +16,11 @@ dist/
 node_modules/
 frontend/dist/
 frontend/.vite/
+# tsc bookkeeping and the redirected output of the vite.config project. tsc must
+# never emit next to the sources again: Vite resolves .js before .ts, so a stray
+# compiled file silently shadows its own source (see noEmit in frontend/tsconfig.json).
+frontend/.tsbuild/
+*.tsbuildinfo
 
 # Docker
 *.log

@@ -1,6 +1,11 @@
 {
   "compilerOptions": {
+    // A referenced composite project may not set noEmit (TS6310), so instead of
+    // suppressing output we send it somewhere harmless. Left at the default it
+    // writes vite.config.js + vite.config.d.ts beside vite.config.ts, and Vite
+    // loads the generated .js in preference to the real config.
     "composite": true,
+    "outDir": "./.tsbuild",
     "target": "ES2022",
     "lib": ["ES2023"],
     "module": "ESNext",
