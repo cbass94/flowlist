@@ -698,9 +698,46 @@ def _format_events_block(events: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def _classify_batch(events: list[dict]) -> list[str | None]:
+def _format_corrections_block(corrections: list[dict] | None) -> str:
+    """
+    Render the user's past bucket corrections as a prompt section.
+
+    These are cases where the classifier already got it wrong and the user said
+    so. Events matching a correction never reach Claude at all (colorize_service
+    resolves overrides first), so the value here is generalization: teaching the
+    user's taste well enough to place a new, similar event correctly the first
+    time.
+
+    Returns "" when there is nothing to teach, which leaves the prompt exactly as
+    it was before this feature.
+    """
+    if not corrections:
+        return ""
+    lines = [
+        "## Corrections from this user",
+        "",
+        "They have overruled these classifications before. Treat them as the",
+        "strongest available signal about this particular person's judgment, and",
+        "apply the same reasoning to similar events below.",
+        "",
+    ]
+    for c in corrections:
+        summary = (c.get("summary") or "").strip().replace("\n", " ")[:120]
+        if not summary:
+            continue
+        lines.append(f'- "{summary}" — not {c.get("was")}, they classify this as {c.get("bucket")}')
+    lines.append("")
+    return "\n".join(lines)
+
+
+async def _classify_batch(
+    events: list[dict], corrections: list[dict] | None = None
+) -> list[str | None]:
     """Classify a single batch (<= _MAX_CLASSIFY_BATCH). Raises on API error."""
-    prompt = _TMPL_EVENT_CLASSIFY.format(events_block=_format_events_block(events))
+    prompt = _TMPL_EVENT_CLASSIFY.format(
+        events_block=_format_events_block(events),
+        corrections_block=_format_corrections_block(corrections),
+    )
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     response = await client.messages.create(
         model=settings.anthropic_model,
@@ -722,10 +759,16 @@ async def _classify_batch(events: list[dict]) -> list[str | None]:
     return result
 
 
-async def classify_events(events: list[dict]) -> list[str | None]:
+async def classify_events(
+    events: list[dict], corrections: list[dict] | None = None
+) -> list[str | None]:
     """
     Classify events into productivity buckets, returning a list aligned with the
     input (None where Claude gave no/invalid answer).
+
+    corrections: past user overrides as {"summary", "was", "bucket"} dicts, shown
+    to Claude so it can generalize from them. Optional — omitting them only makes
+    the classifier less well-informed, never wrong.
 
     Graceful degradation: on any Anthropic API error, returns all-None so the
     caller changes no colors this run (never wipe on failure).
@@ -736,7 +779,7 @@ async def classify_events(events: list[dict]) -> list[str | None]:
     try:
         for start in range(0, len(events), _MAX_CLASSIFY_BATCH):
             batch = events[start:start + _MAX_CLASSIFY_BATCH]
-            out.extend(await _classify_batch(batch))
+            out.extend(await _classify_batch(batch, corrections))
         return out
     except anthropic.APIError as exc:
         log.warning("classify_events: Anthropic API error, skipping coloring: %s", exc)

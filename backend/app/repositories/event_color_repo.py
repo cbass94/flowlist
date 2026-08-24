@@ -20,6 +20,36 @@ async def get_by_user(session: AsyncSession, user_id: int) -> list[EventColor]:
     return list(result.scalars().all())
 
 
+async def get_by_event_id(
+    session: AsyncSession, user_id: int, google_event_id: str
+) -> EventColor | None:
+    result = await session.execute(
+        select(EventColor).where(
+            EventColor.user_id == user_id,
+            EventColor.google_event_id == google_event_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def set_applied_color(
+    session: AsyncSession, row: EventColor, bucket: str, color_id: str
+) -> None:
+    """
+    Record that FlowList just wrote this color, outside the normal colorize run.
+
+    Used when a color is pushed from the app (a task's pinned bucket). Keeps
+    applied_color_id truthful so the next run recognizes the color as its own
+    rather than as a manual edit. Also clears is_user_overridden: an explicit
+    override supersedes whatever made us cede this event before.
+    """
+    row.bucket = bucket
+    row.applied_color_id = color_id
+    row.is_user_overridden = False
+    row.updated_at = datetime.now(tz=timezone.utc)
+    await session.flush()
+
+
 async def upsert(
     session: AsyncSession,
     *,

@@ -31,6 +31,7 @@ productivity buckets, based on a 2×2 matrix:
 - When genuinely unsure, pick the closest fit — the user can recolor by hand and
   FlowList will respect that.
 
+{corrections_block}
 ## Events to classify
 
 Each event is given with an index. Return exactly one bucket per index, using

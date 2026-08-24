@@ -8,6 +8,7 @@ Google Calendar event color to match.
 This module owns the parts that must be deterministic and unit-testable:
   - which events are eligible to color,
   - a stable content signature (so unchanged events are never re-classified),
+  - how an event is matched against the user's stored bucket overrides,
   - the state machine that decides whether to color/recolor an event or leave it
     alone (respecting colors the user set by hand).
 
@@ -17,6 +18,8 @@ The AI call and the Google Calendar patch live in the service layer.
 from __future__ import annotations
 
 import hashlib
+import re
+import unicodedata
 from typing import Literal
 
 # The four productivity buckets (2×2 matrix).
@@ -34,7 +37,10 @@ _DEFAULT_COLOR_MAP: dict[str, str] = {
     "unnecessary": "8",
 }
 
-Action = Literal["skip", "apply", "update", "cede"]
+Action = Literal["skip", "apply", "update", "cede", "adopt"]
+
+# Override match scopes, most specific first. See override_key_candidates.
+SCOPES: tuple[str, ...] = ("task", "series", "title")
 
 
 def default_color_map() -> dict[str, str]:
@@ -86,6 +92,99 @@ def content_signature(event: dict) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:64]
 
 
+# Characters that carry no classification meaning but vary freely between
+# otherwise-identical events (emoji, brackets, punctuation, separators).
+_PUNCT_RE = re.compile(r"[^\w\s]", flags=re.UNICODE)
+# Trailing instance markers: "Weekly Sync #12", "Standup (3)", "Review - 2".
+_TRAILING_INDEX_RE = re.compile(r"[\s\-–—]*[#(\[]?\d+[)\]]?\s*$")
+_WS_RE = re.compile(r"\s+")
+
+
+def normalize_title(summary: str | None) -> str:
+    """
+    Reduce an event title to a stable key, so that events a human would call
+    "the same meeting" collapse to the same string.
+
+    Deliberately conservative: it strips formatting noise, not words. Dropping
+    words (a trailing attendee name, say) would make unrelated meetings collide,
+    and a title override that matches too much is worse than one that matches too
+    little — a missed match just means the event gets classified normally.
+
+    Removes the [FlowList] tag, emoji and punctuation, a trailing instance number
+    ("Weekly Sync #12" -> "weekly sync"), and case/whitespace variation.
+    Returns "" for a title with nothing left, which never matches.
+    """
+    if not summary:
+        return ""
+    text = summary.replace("[FlowList]", " ")
+    # Normalize accents/width so "Café" and "Cafe" don't split a rule in two.
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.casefold()
+    text = _TRAILING_INDEX_RE.sub("", text)
+    text = _PUNCT_RE.sub(" ", text)
+    text = _WS_RE.sub(" ", text).strip()
+    # match_key is String(255); a title longer than that is truncated on both
+    # the write and the lookup path, so the two still agree.
+    return text[:255]
+
+
+def override_key_candidates(
+    event: dict, task_id: int | None = None
+) -> list[tuple[str, str]]:
+    """
+    The (scope, match_key) pairs this event could be matched by, most specific
+    first: the task it belongs to, then its recurring series, then its title.
+
+    Order is the precedence — resolve_override takes the first that hits, so a
+    per-task correction beats a series rule, which beats a title rule.
+    """
+    candidates: list[tuple[str, str]] = []
+    if task_id is not None:
+        candidates.append(("task", str(task_id)))
+    series_id = event.get("recurring_event_id")
+    if series_id:
+        candidates.append(("series", str(series_id)[:255]))
+    title_key = normalize_title(event.get("summary"))
+    if title_key:
+        candidates.append(("title", title_key))
+    return candidates
+
+
+def resolve_override(
+    candidates: list[tuple[str, str]],
+    overrides: dict[tuple[str, str], str],
+) -> tuple[str, str] | None:
+    """
+    First matching override for these candidates, as (bucket, scope).
+    None when the user has expressed no preference for this event.
+    """
+    for scope, key in candidates:
+        bucket = overrides.get((scope, key))
+        if bucket is not None:
+            return bucket, scope
+    return None
+
+
+def reverse_bucket(color_id: str | None, color_map: dict[str, str]) -> str | None:
+    """
+    Read a Google colorId back as a bucket, inverting the user's color map.
+
+    This is what lets a manual recolor in Google Calendar be understood as
+    intent rather than just a refusal. A color the user hasn't assigned to any
+    bucket says nothing about buckets, and returns None.
+
+    Ambiguity is possible — nothing stops two buckets sharing a color — so
+    resolution follows BUCKETS order for a stable, predictable answer.
+    """
+    if not color_id:
+        return None
+    for bucket in BUCKETS:
+        if color_map.get(bucket) == color_id:
+            return bucket
+    return None
+
+
 def decide_action(
     current_color: str | None,
     *,
@@ -93,6 +192,7 @@ def decide_action(
     record_applied_color: str | None,
     record_overridden: bool,
     desired_color: str | None,
+    adoptable: bool = False,
 ) -> Action:
     """
     Decide what to do with an event's color, respecting manual edits.
@@ -101,28 +201,43 @@ def decide_action(
     has_record:           whether FlowList has a color record for this event
     record_applied_color: the colorId FlowList last wrote (if has_record)
     record_overridden:    whether we already ceded control of this event
-    desired_color:        the colorId for the event's (re)classified bucket
+    desired_color:        the colorId FlowList wants — from the user's override
+                          when one matched, otherwise from the classification
+    adoptable:            whether current_color maps back to a bucket
+                          (reverse_bucket found one), i.e. whether a manual edit
+                          can be read as intent
 
     Returns:
       apply  — first-time color of an unmanaged, uncolored event
-      update — recolor an event we manage because its bucket changed
-      cede   — stop managing (a pre-existing or user-changed color)
+      update — recolor an event we manage because its desired bucket changed
+      adopt  — learn the color the user chose as a durable bucket override
+      cede   — stop managing (a color we cannot interpret as a bucket)
       skip   — nothing to do
-    """
-    if not has_record:
-        if current_color is None:
-            return "apply"
-        # Event already has a color we didn't set — respect it.
-        return "cede"
 
-    if record_overridden:
+    The branches are ordered by whose signal is newest, because that is what
+    makes the feature feel obedient: a color the user just set outranks a stored
+    override, which outranks the classifier.
+
+    Note that desired_color carries the override implicitly — the caller resolves
+    it — so there is no separate has_override flag to keep in sync.
+    """
+    if has_record and record_overridden:
+        # An event we previously ceded. Reconsider it once: if the color the
+        # user chose means something, recover it as a real override (this is how
+        # cedes recorded before overrides existed get their meaning back).
+        # Otherwise they want something FlowList has no name for — leave it be,
+        # permanently, even if an override would otherwise match.
+        return "adopt" if adoptable else "skip"
+
+    if has_record and current_color != record_applied_color:
+        # The color changed out from under us: a manual edit since our last write.
+        return "adopt" if adoptable else "cede"
+
+    if not has_record and current_color is not None:
+        # Pre-existing color on an event we have never managed.
+        return "adopt" if adoptable else "cede"
+
+    if desired_color is None or current_color == desired_color:
         return "skip"
 
-    if current_color != record_applied_color:
-        # The user changed the color we set — cede control.
-        return "cede"
-
-    if desired_color is not None and desired_color != record_applied_color:
-        return "update"
-
-    return "skip"
+    return "update" if has_record else "apply"

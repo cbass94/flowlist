@@ -257,6 +257,11 @@ def _parse_synthesis_event(event: dict) -> dict[str, Any]:
         "transparency": event.get("transparency"),
         # Current per-user event color (None = default/uncolored)
         "color_id": event.get("colorId"),
+        # Set on instances of a recurring event, identifying the series. We fetch
+        # with singleEvents=True, so every instance arrives as its own event with
+        # its own id — this is the only thing tying them together, and it is what
+        # lets one colour correction cover a whole recurring meeting.
+        "recurring_event_id": event.get("recurringEventId"),
     }
 
 

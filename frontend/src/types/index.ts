@@ -37,6 +37,9 @@ export interface Task {
   linked_calendar_event_id: string | null;
   linked_calendar_event_title: string | null;
   linked_calendar_event_start: string | null;
+  // Productivity bucket the user pinned for this task, overriding the
+  // classifier; null when the task follows whatever the AI decided.
+  bucket_override: string | null;
   // Cached AI Assistant response
   ai_assistant_cache: AssistantCachedData | null;
   ai_assistant_cached_at: string | null;
@@ -153,6 +156,9 @@ export interface TaskUpdate {
   linked_calendar_event_id?: string | null;
   linked_calendar_event_title?: string | null;
   linked_calendar_event_start?: string | null;
+  // A bucket name pins this task's color; explicit null clears the pin and
+  // hands the task back to the classifier. Omit to leave it untouched.
+  bucket_override?: string | null;
 }
 
 export interface ReorderRequest {

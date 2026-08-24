@@ -152,8 +152,21 @@ a banner or aggressive highlight.
   synthesis blocks. Skips all-day, cancelled, and declined events.
 - v1 is AI auto-classify only (rules-based mapping deferred to a later version).
 - Respects manual colors: FlowList tracks what it colored (event_colors table).
-  If the user changes a color by hand, FlowList cedes control of that event.
   Pre-existing manual colors are never overwritten.
+- Bucket overrides (migration 0015): the user can correct a classification, and
+  the correction sticks and generalizes. Overrides are matched most-specific
+  first — task (task id, survives the reschedule that recreates blocks with new
+  event ids), then series (recurringEventId, so one fix covers every instance of
+  a recurring meeting), then title (normalized summary, catches similar one-offs).
+- Two ways to correct: the bucket picker in a task's expanded row (writes a
+  task-scope override via PATCH /api/tasks/{id} bucket_override — a bucket name
+  pins it, explicit null clears it), or recoloring in Google Calendar. A manual
+  Google color that maps back to a bucket is ADOPTED as an override rather than
+  ceded; only a color outside the user's bucket map still cedes.
+- Overrides are resolved BEFORE the AI, so a corrected event is never
+  re-classified and cannot drift back. Recent corrections are also injected into
+  event_classify.md ({corrections_block}) so new-but-similar events land right
+  the first time.
 - Classification is cached by a content signature (title+attendees+description+
   start); unchanged events are never re-sent to Claude. AI failure → nothing is
   recolored that run (never wipe on error).
@@ -278,6 +291,15 @@ a banner or aggressive highlight.
   own. Opt-in (colorize_enabled default false); hourly cron colorize_calendars
   + folded into schedule_all_tasks. User settings colorize_enabled +
   color_{purposeful,necessary,distracting,unnecessary}.
+- Bucket overrides: bucket_overrides table (migration 0015) keyed
+  (user_id, scope, match_key) where scope is task|series|title. Pure matching in
+  services/colorize.py (normalize_title, override_key_candidates,
+  resolve_override, reverse_bucket); decide_action gained an `adopt` action that
+  turns a manual Google recolor into a stored override. Repo
+  bucket_override_repo (recent_for_prompt feeds the classifier). Task-scope
+  overrides are read/written through TaskRead/TaskUpdate.bucket_override; UI is
+  components/BucketPicker.tsx in TaskRow's expanded panel. Deliberately no
+  calendar/agenda view — non-task events are corrected in Google Calendar.
 - Synthesis time: 15-min buffer auto-created after multi-person meetings
   (migration 0013). calendar_blocks extended with block_type ('task'|
   'synthesis'), nullable task_id, direct user_id, and source_google_event_id.

@@ -11,6 +11,7 @@ from typing import Any, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from app.models.task import TaskStatus, TaskType
+from app.services.colorize import BUCKETS
 from app.services.ai_service import AISuggestion, ParseRequest, ParseResponse
 
 __all__ = [
@@ -82,6 +83,19 @@ class TaskUpdate(BaseModel):
     linked_calendar_event_id: Optional[str] = None
     linked_calendar_event_title: Optional[str] = None
     linked_calendar_event_start: Optional[str] = None
+    # Productivity bucket the user has pinned for this task, overriding whatever
+    # the classifier decided. Send null to clear it and hand the task back to
+    # the AI. Absent (unset) leaves any existing override alone.
+    bucket_override: Optional[str] = None
+
+    @field_validator("bucket_override")
+    @classmethod
+    def validate_bucket(cls, v: object) -> object:
+        if v is None:
+            return v
+        if v not in BUCKETS:
+            raise ValueError(f"bucket_override must be one of {', '.join(BUCKETS)}")
+        return v
 
 
 class TaskRead(BaseModel):
@@ -112,6 +126,9 @@ class TaskRead(BaseModel):
     linked_calendar_event_id: Optional[str] = None
     linked_calendar_event_title: Optional[str] = None
     linked_calendar_event_start: Optional[str] = None
+    # Productivity bucket pinned by the user (bucket_overrides, scope=task);
+    # None when the task follows the classifier. Populated by the router.
+    bucket_override: Optional[str] = None
     # Cached AI Assistant response
     ai_assistant_cache: Optional[Any] = None
     ai_assistant_cached_at: Optional[datetime] = None

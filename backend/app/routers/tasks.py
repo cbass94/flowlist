@@ -20,7 +20,13 @@ from app.database import get_db
 from app.models.scheduling_run_log import ScheduleTrigger
 from app.models.task import TaskStatus
 from app.models.user import User
-from app.repositories import ai_log_repo, calendar_block_repo, task_repo
+from app.repositories import (
+    ai_log_repo,
+    bucket_override_repo,
+    calendar_block_repo,
+    event_color_repo,
+    task_repo,
+)
 from app.schemas.envelope import ApiResponse, ok
 from app.schemas.task import (
     BlockDoneRequest,
@@ -67,15 +73,78 @@ async def _blocks_with_buckets(
     }
 
 
+async def _current_task_bucket(
+    db: AsyncSession, user_id: int, task_id: int
+) -> str | None:
+    """
+    The bucket a task's blocks currently carry, i.e. what the classifier decided.
+
+    Recorded as was_bucket on the override so the prompt can show Claude a real
+    correction ("not distracting, they call this necessary") rather than a bare
+    preference. None when nothing is classified yet.
+    """
+    blocks = await calendar_block_repo.get_active_future_blocks_for_task(db, task_id)
+    if not blocks:
+        return None
+    buckets = await calendar_block_repo.get_buckets_by_event_ids(
+        db, user_id, [b.google_event_id for b in blocks]
+    )
+    return next(iter(buckets.values()), None)
+
+
+async def _apply_task_bucket_color(
+    db: AsyncSession, user: User, task_id: int, bucket: str | None
+) -> None:
+    """
+    Push a task's pinned bucket onto its future calendar blocks straight away,
+    so the correction is visible without waiting for the hourly colorize run.
+
+    Best-effort: a Google failure here must not fail the update, and the next
+    colorize run reconciles anything missed. Clearing an override (bucket=None)
+    deliberately leaves the current colors alone rather than stripping them —
+    the classifier decides what they become on its next pass.
+    """
+    if bucket is None or not user.colorize_enabled:
+        return
+    color_id = user.bucket_color_map.get(bucket)
+    if not color_id:
+        return
+
+    blocks = await calendar_block_repo.get_active_future_blocks_for_task(db, task_id)
+    for block in blocks:
+        try:
+            await calendar_service.patch_event_color(
+                user, db,
+                block.calendar_id,
+                block.account,  # type: ignore[arg-type]
+                block.google_event_id,
+                color_id,
+            )
+        except Exception:
+            log.warning(
+                "update_task: failed to patch color for block %s of task %d",
+                block.google_event_id, task_id, exc_info=True,
+            )
+            continue
+        # Keep event_colors in step with what is now on the calendar. Without
+        # this the next colorize run sees a color it did not write, reads it as a
+        # fresh manual edit, and re-adopts an override it already has.
+        record = await event_color_repo.get_by_event_id(db, user.id, block.google_event_id)
+        if record is not None:
+            await event_color_repo.set_applied_color(db, record, bucket, color_id)
+
+
 async def _task_read_with_next_start(db: AsyncSession, task: "Task") -> TaskRead:
     """Build a TaskRead with next_scheduled_start and blocks populated from calendar_blocks."""
     next_starts = await calendar_block_repo.get_earliest_start_by_task_ids(db, [task.id])
     blocks_map = await calendar_block_repo.get_active_blocks_by_task_ids(db, [task.id])
     blocks_by_task = await _blocks_with_buckets(db, task.user_id, blocks_map)
+    pinned = await bucket_override_repo.get_buckets_by_scope(db, task.user_id, "task")
     return TaskRead.model_validate(task).model_copy(
         update={
             "next_scheduled_start": next_starts.get(task.id),
             "blocks": blocks_by_task.get(task.id, []),
+            "bucket_override": pinned.get(str(task.id)),
         }
     )
 
@@ -149,10 +218,12 @@ async def list_tasks(
     next_starts = await calendar_block_repo.get_earliest_start_by_task_ids(db, task_ids)
     blocks_map = await calendar_block_repo.get_active_blocks_by_task_ids(db, task_ids)
     blocks_by_task = await _blocks_with_buckets(db, current_user.id, blocks_map)
+    pinned = await bucket_override_repo.get_buckets_by_scope(db, current_user.id, "task")
     reads = [
         TaskRead.model_validate(t).model_copy(update={
             "next_scheduled_start": next_starts.get(t.id),
             "blocks": blocks_by_task.get(t.id, []),
+            "bucket_override": pinned.get(str(t.id)),
         })
         for t in tasks
     ]
@@ -228,8 +299,31 @@ async def update_task(
     if task is None or task.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Task not found")
     updates = body.model_dump(exclude_unset=True)
+    # bucket_override lives in bucket_overrides, not on the task row — pull it
+    # out before the ORM update. Popping on "in" (not truthiness) is what makes
+    # an explicit null mean "clear it" and an absent field mean "leave it".
+    has_bucket_change = "bucket_override" in updates
+    new_bucket = updates.pop("bucket_override", None)
     if updates:
         task = await task_repo.update_fields(db, task_id, **updates)
+
+    if has_bucket_change:
+        if new_bucket is None:
+            await bucket_override_repo.remove(
+                db, current_user.id, "task", str(task_id)
+            )
+        else:
+            await bucket_override_repo.upsert(
+                db,
+                user_id=current_user.id,
+                scope="task",
+                match_key=str(task_id),
+                bucket=new_bucket,
+                was_bucket=await _current_task_bucket(db, current_user.id, task_id),
+                example_summary=(task.title if task is not None else None),
+                source="app",
+            )
+        await _apply_task_bucket_color(db, current_user, task_id, new_bucket)
 
     changed_fields = set(updates.keys())
     if changed_fields & _RESCHEDULE_FIELDS:

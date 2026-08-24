@@ -20,6 +20,7 @@ import { tasksApi } from "../services/tasks";
 import { aiApi } from "../services/ai";
 import api from "../services/api";
 import { useBucketColors } from "../hooks/useBucketColors";
+import { BucketPicker } from "./BucketPicker";
 import type {
   Task,
   TaskBlock,
@@ -872,6 +873,12 @@ export function TaskRow({ task, isDraggable = true, position }: Props) {
     });
   }
 
+  function handleBucketChange(bucket: string | null) {
+    // null clears the pin. Sent explicitly (not omitted) so the API can tell
+    // "clear this" apart from "don't touch it".
+    updateMutation.mutate({ bucket_override: bucket });
+  }
+
   function handleUnlinkEvent() {
     updateMutation.mutate({
       linked_calendar_event_id: null,
@@ -1326,6 +1333,14 @@ export function TaskRow({ task, isDraggable = true, position }: Props) {
                   </ul>
                 </div>
               )}
+
+              {/* Calendar color */}
+              <BucketPicker
+                value={task.bucket_override}
+                classified={chunkInfo.displayed?.bucket ?? null}
+                disabled={isBusy}
+                onChange={handleBucketChange}
+              />
 
               {/* Linked calendar event */}
               <div>

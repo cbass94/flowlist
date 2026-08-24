@@ -252,6 +252,31 @@ async def get_buckets_by_event_ids(
     return {event_id: bucket for event_id, bucket in result.all()}
 
 
+async def get_task_ids_by_event_ids(
+    session: AsyncSession,
+    user_id: int,
+    google_event_ids: list[str],
+) -> dict[str, int]:
+    """
+    Return {google_event_id: task_id} for the given events.
+
+    Lets the colorizer tell which calendar events are a task's scheduled blocks,
+    so a per-task bucket override can be matched against them. Includes
+    soft-deleted blocks: an event still on the calendar whose block was deleted
+    should keep answering to its task.
+    """
+    if not google_event_ids:
+        return {}
+    result = await session.execute(
+        select(CalendarBlock.google_event_id, CalendarBlock.task_id).where(
+            CalendarBlock.user_id == user_id,
+            CalendarBlock.task_id.isnot(None),
+            CalendarBlock.google_event_id.in_(google_event_ids),
+        )
+    )
+    return {event_id: task_id for event_id, task_id in result.all()}
+
+
 async def get_earliest_start_by_task_ids(
     session: AsyncSession,
     task_ids: list[int],
