@@ -1,9 +1,11 @@
 // FlowList — Root app component
 // Auth-gates the main view; provides routing between Backlog, Archive, and Settings.
 
+import { useEffect, useRef, useState } from 'react';
 import { Routes, Route, NavLink, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import { useTheme } from './hooks/useTheme';
+import { SearchProvider, useSearch } from './hooks/useSearch';
 import { LoginScreen } from './components/LoginScreen';
 import { TaskInput } from './components/TaskInput';
 import { BacklogView } from './components/BacklogView';
@@ -36,6 +38,124 @@ function IconSettings() {
       <path strokeLinecap='round' strokeLinejoin='round' d='M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' />
       <path strokeLinecap='round' strokeLinejoin='round' d='M15 12a3 3 0 11-6 0 3 3 0 016 0z' />
     </svg>
+  );
+}
+
+function IconSearch() {
+  return (
+    <svg className='w-4 h-4' fill='none' stroke='currentColor' strokeWidth={1.75} viewBox='0 0 24 24'>
+      <circle cx='11' cy='11' r='7' strokeLinecap='round' strokeLinejoin='round' />
+      <path strokeLinecap='round' strokeLinejoin='round' d='M16.5 16.5L21 21' />
+    </svg>
+  );
+}
+
+/**
+ * Collapsed backlog search. Only mounts on the backlog route, so it never sits
+ * in the header doing nothing. While a query is active but the popover is shut,
+ * the icon stays tinted with a dot badge - otherwise the list would be filtered
+ * with nothing on screen to say so.
+ */
+function SearchControl() {
+  const { query, setQuery, clear } = useSearch();
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const active = query.trim().length > 0;
+
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (open && !wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && open) {
+        setOpen(false);
+        return;
+      }
+      // Slash focuses search, unless the user is already typing somewhere.
+      const el = document.activeElement;
+      const typing =
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        (el instanceof HTMLElement && el.isContentEditable);
+      if (e.key === '/' && !typing && !open) {
+        e.preventDefault();
+        setOpen(true);
+      }
+    }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className='relative'>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-label={active ? 'Search: ' + query : 'Search tasks'}
+        aria-expanded={open}
+        title='Search tasks  ( / )'
+        className={
+          'relative p-1 rounded-md transition-colors ' +
+          (active || open
+            ? 'text-gray-900 dark:text-gray-50'
+            : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300')
+        }
+      >
+        <IconSearch />
+        {active && !open && (
+          <span className='absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-blue-500 ring-2 ring-gray-50 dark:ring-gray-950' />
+        )}
+      </button>
+
+      {open && (
+        <div
+          className='absolute right-0 top-full mt-1.5 z-30 w-[min(20rem,calc(100vw-2rem))]
+                     rounded-xl border border-gray-200/80 dark:border-gray-700/80 bg-white dark:bg-gray-900
+                     shadow-lg shadow-gray-200/60 dark:shadow-black/40 p-2'
+        >
+          <div className='relative'>
+            <span className='absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 pointer-events-none'>
+              <IconSearch />
+            </span>
+            <input
+              ref={inputRef}
+              type='text'
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder='Search tasks...'
+              className='w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800
+                         pl-8 pr-8 py-1.5 text-sm text-gray-900 dark:text-gray-100
+                         placeholder-gray-400 dark:placeholder-gray-500
+                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/20
+                         focus-visible:border-blue-300 dark:focus-visible:border-blue-500 transition-colors'
+            />
+            {active && (
+              <button
+                onClick={() => {
+                  clear();
+                  inputRef.current?.focus();
+                }}
+                aria-label='Clear search'
+                className='absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500
+                           hover:text-gray-600 dark:hover:text-gray-300 transition-colors p-0.5'
+              >
+                <svg className='w-3.5 h-3.5' viewBox='0 0 16 16' fill='currentColor'>
+                  <path d='M4.22 4.22a.75.75 0 0 1 1.06 0L8 6.94l2.72-2.72a.75.75 0 1 1 1.06 1.06L9.06 8l2.72 2.72a.75.75 0 1 1-1.06 1.06L8 9.06l-2.72 2.72a.75.75 0 0 1-1.06-1.06L6.94 8 4.22 5.28a.75.75 0 0 1 0-1.06Z' />
+                </svg>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -89,6 +209,8 @@ function TopNav({ userName, theme, onToggleTheme }: {
   onToggleTheme: () => void;
 }) {
   const title = usePageTitle();
+  const location = useLocation();
+  const onBacklog = location.pathname === '/';
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-medium transition-all duration-150 ' +
@@ -122,6 +244,7 @@ function TopNav({ userName, theme, onToggleTheme }: {
               {userName}
             </span>
           )}
+          {onBacklog && <SearchControl />}
           <button
             onClick={onToggleTheme}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
@@ -184,18 +307,20 @@ function AuthenticatedApp() {
   const userName = user?.display_name ?? user?.email ?? null;
 
   return (
-    <div className='min-h-screen bg-gray-50 dark:bg-gray-950'>
-      <TopNav userName={userName} theme={theme} onToggleTheme={toggleTheme} />
-      <main className='max-w-2xl mx-auto px-4 py-6 pb-24'>
-        <Routes>
-          <Route path='/' element={<BacklogPage />} />
-          <Route path='/archive' element={<ArchivePage />} />
-          <Route path='/settings' element={<SettingsPage />} />
-          <Route path='*' element={<Navigate to='/' replace />} />
-        </Routes>
-      </main>
-      <BottomTabBar />
-    </div>
+    <SearchProvider>
+      <div className='min-h-screen bg-gray-50 dark:bg-gray-950'>
+        <TopNav userName={userName} theme={theme} onToggleTheme={toggleTheme} />
+        <main className='max-w-2xl mx-auto px-4 py-6 pb-24'>
+          <Routes>
+            <Route path='/' element={<BacklogPage />} />
+            <Route path='/archive' element={<ArchivePage />} />
+            <Route path='/settings' element={<SettingsPage />} />
+            <Route path='*' element={<Navigate to='/' replace />} />
+          </Routes>
+        </main>
+        <BottomTabBar />
+      </div>
+    </SearchProvider>
   );
 }
 

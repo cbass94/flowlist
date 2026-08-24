@@ -27,6 +27,8 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { tasksApi } from "../services/tasks";
+import { useSearch } from "../hooks/useSearch";
+import { ColorLegend } from "./ColorLegend";
 import { TaskRow } from "./TaskRow";
 import type { Task } from "../types";
 
@@ -42,7 +44,7 @@ export function BacklogView() {
     staleTime: 30_000,
   });
 
-  const [search, setSearch] = useState("");
+  const { query: search, clear: clearSearch } = useSearch();
 
   const matchesSearch = (t: Task) => {
     if (!search.trim()) return true;
@@ -144,46 +146,8 @@ export function BacklogView() {
 
   return (
     <div className="space-y-2">
-      {/* Search bar */}
-      {allTasks.length > 0 && (
-        <div className="relative">
-          <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500 pointer-events-none"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="7" cy="7" r="4.5" />
-            <path d="M10.5 10.5L14 14" />
-          </svg>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search tasks..."
-            className="w-full rounded-xl border border-gray-200/80 dark:border-gray-700/80 bg-white dark:bg-gray-900 pl-9 pr-8 py-2.5
-                       text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 shadow-sm shadow-gray-100 dark:shadow-black/20
-                       focus-visible:border-blue-300 dark:focus-visible:border-blue-500 focus-visible:outline-none
-                       focus-visible:ring-2 focus-visible:ring-blue-500/20
-                       transition-all duration-150"
-          />
-          {search && (
-            <button
-              onClick={() => setSearch("")}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500
-                         hover:text-gray-600 dark:hover:text-gray-300 transition-colors p-0.5"
-              aria-label="Clear search"
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M4.22 4.22a.75.75 0 0 1 1.06 0L8 6.94l2.72-2.72a.75.75 0 1 1 1.06 1.06L9.06 8l2.72 2.72a.75.75 0 1 1-1.06 1.06L8 9.06l-2.72 2.72a.75.75 0 0 1-1.06-1.06L6.94 8 4.22 5.28a.75.75 0 0 1 0-1.06Z" />
-              </svg>
-            </button>
-          )}
-        </div>
-      )}
+      {/* Calendar color key */}
+      <ColorLegend />
 
       {/* Overdue tasks banner */}
       {overdueTasks.length > 0 && !search.trim() && (
@@ -226,8 +190,20 @@ export function BacklogView() {
       {/* Active task list */}
       {displayedActive.length === 0 ? (
         <div className="rounded-xl border-2 border-dashed border-gray-200/80 dark:border-gray-700/80 px-4 py-10
-                        text-center text-sm text-gray-400 dark:text-gray-500">
-          {search.trim() ? "No tasks match your search." : "No tasks yet — add one above!"}
+                        text-center text-sm text-gray-400 dark:text-gray-500 space-y-2">
+          {search.trim() ? (
+            <>
+              <p>No tasks match “{search.trim()}”.</p>
+              <button
+                onClick={clearSearch}
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                Clear search
+              </button>
+            </>
+          ) : (
+            <p>No tasks yet — add one above!</p>
+          )}
         </div>
       ) : (
         <DndContext
