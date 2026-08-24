@@ -36,6 +36,9 @@ class TaskBlockInfo(BaseModel):
     id: int
     start_at: datetime
     end_at: datetime
+    # Productivity bucket from calendar color-coding (event_colors), or None
+    # when the block hasn't been classified yet / colorize is off.
+    bucket: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

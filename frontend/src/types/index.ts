@@ -46,6 +46,8 @@ export interface TaskBlock {
   id: number;
   start_at: string;  // ISO datetime
   end_at: string;    // ISO datetime
+  // Productivity bucket from calendar color-coding; null until classified.
+  bucket: string | null;
 }
 
 export interface MoreWorkSuggestion {

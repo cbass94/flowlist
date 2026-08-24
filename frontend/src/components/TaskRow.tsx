@@ -19,6 +19,7 @@ import clsx from "clsx";
 import { tasksApi } from "../services/tasks";
 import { aiApi } from "../services/ai";
 import api from "../services/api";
+import { useBucketColors } from "../hooks/useBucketColors";
 import type {
   Task,
   TaskBlock,
@@ -713,6 +714,13 @@ export function TaskRow({ task, isDraggable = true, position }: Props) {
 
   const chunkInfo = useMemo(() => computeChunkInfo(task), [task]);
 
+  // Color the row from the same block whose time is printed on it, so the
+  // stripe and the timestamp can never disagree.
+  const { hexFor, buckets } = useBucketColors();
+  const stripeHex = hexFor(chunkInfo.displayed?.bucket);
+  const stripeLabel =
+    buckets.find((b) => b.key === chunkInfo.displayed?.bucket)?.label ?? null;
+
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({
       id: task.id,
@@ -879,13 +887,24 @@ export function TaskRow({ task, isDraggable = true, position }: Props) {
       ref={setNodeRef}
       style={style}
       className={clsx(
-        "bg-white dark:bg-gray-900 border border-gray-200/60 dark:border-gray-700/60 rounded-xl shadow-sm shadow-gray-100 dark:shadow-black/20 transition-shadow",
+        "bg-white dark:bg-gray-900 border border-gray-200/60 dark:border-gray-700/60 rounded-xl shadow-sm shadow-gray-100 dark:shadow-black/20 transition-shadow overflow-hidden",
         isDragging ? "shadow-lg shadow-gray-200/80 dark:shadow-black/40 opacity-80 z-10" : "",
-        task.procrastination_flag && "border-l-4 border-l-amber-400"
+        // Procrastination reads via the ⚠ glyph + this ring; the left edge is
+        // reserved for the calendar color stripe.
+        task.procrastination_flag && "ring-1 ring-amber-300/60 dark:ring-amber-500/40"
       )}
     >
       {/* Main row */}
       <div className="flex items-stretch">
+        {/* Calendar color stripe — the bucket of the block whose time is shown
+            alongside it. Absent (no reserved gutter) until classified. */}
+        {stripeHex && (
+          <div
+            className="w-[3px] shrink-0"
+            style={{ backgroundColor: stripeHex }}
+            title={stripeLabel ?? undefined}
+          />
+        )}
         {/* Drag handle */}
         {isDraggable && (
           <button
@@ -893,7 +912,7 @@ export function TaskRow({ task, isDraggable = true, position }: Props) {
             {...listeners}
             className="flex items-center justify-center w-10 shrink-0 text-gray-300 dark:text-gray-600
                        hover:text-gray-500 dark:hover:text-gray-400 cursor-grab active:cursor-grabbing
-                       touch-none rounded-l-xl"
+                       touch-none"
             aria-label="Drag to reorder"
             tabIndex={-1}
           >

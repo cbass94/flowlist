@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { settingsApi, type UpdateSettings } from "../services/settings";
 import { invitesApi } from "../services/invites";
 import { useAuth } from "../hooks/useAuth";
+import { BUCKET_META, GOOGLE_COLORS, hexForColorId } from "../lib/googleColors";
 import type { CalendarItem, Invite } from "../types";
 
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => ({
@@ -30,20 +31,6 @@ const DEFAULT_END = "17:00:00";
 
 const inputCls = "text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/20 focus-visible:border-blue-300 dark:focus-visible:border-blue-500 transition-colors";
 
-// Google Calendar's fixed event-color palette (colorId → name + hex swatch)
-const GOOGLE_COLORS: { id: string; name: string; hex: string }[] = [
-  { id: "1", name: "Lavender", hex: "#7986cb" },
-  { id: "2", name: "Sage", hex: "#33b679" },
-  { id: "3", name: "Grape", hex: "#8e24aa" },
-  { id: "4", name: "Flamingo", hex: "#e67c73" },
-  { id: "5", name: "Banana", hex: "#f6bf26" },
-  { id: "6", name: "Tangerine", hex: "#f4511e" },
-  { id: "7", name: "Peacock", hex: "#039be5" },
-  { id: "8", name: "Graphite", hex: "#616161" },
-  { id: "9", name: "Blueberry", hex: "#3f51b5" },
-  { id: "10", name: "Basil", hex: "#0b8043" },
-  { id: "11", name: "Tomato", hex: "#d50000" },
-];
 
 function ColorSelect({
   label,
@@ -56,7 +43,7 @@ function ColorSelect({
   value: string;
   onChange: (id: string) => void;
 }) {
-  const swatch = GOOGLE_COLORS.find((c) => c.id === value)?.hex ?? "#999";
+  const swatch = hexForColorId(value);
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="flex-1">
@@ -801,30 +788,22 @@ export function SettingsPage() {
         </div>
         {settings.colorize_enabled && (
           <div className="px-5 py-4 space-y-3">
-            <ColorSelect
-              label="Purposeful Work"
-              hint="Productive + engaging"
-              value={settings.color_purposeful}
-              onChange={(id) => save({ color_purposeful: id })}
-            />
-            <ColorSelect
-              label="Necessary Work"
-              hint="Productive but not enjoyable"
-              value={settings.color_necessary}
-              onChange={(id) => save({ color_necessary: id })}
-            />
-            <ColorSelect
-              label="Distracting Work"
-              hint="Enjoyable but low-value"
-              value={settings.color_distracting}
-              onChange={(id) => save({ color_distracting: id })}
-            />
-            <ColorSelect
-              label="Unnecessary Work"
-              hint="Low-value busywork"
-              value={settings.color_unnecessary}
-              onChange={(id) => save({ color_unnecessary: id })}
-            />
+            {BUCKET_META.map((b) => (
+              <ColorSelect
+                key={b.key}
+                label={b.label}
+                hint={b.hint}
+                value={
+                  {
+                    purposeful: settings.color_purposeful,
+                    necessary: settings.color_necessary,
+                    distracting: settings.color_distracting,
+                    unnecessary: settings.color_unnecessary,
+                  }[b.key]
+                }
+                onChange={(id) => save({ [`color_${b.key}`]: id })}
+              />
+            ))}
           </div>
         )}
       </section>

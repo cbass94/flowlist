@@ -42,15 +42,40 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 
+async def _blocks_with_buckets(
+    db: AsyncSession,
+    user_id: int,
+    blocks_map: dict[int, list],
+) -> dict[int, list[TaskBlockInfo]]:
+    """
+    Turn {task_id: [CalendarBlock]} into {task_id: [TaskBlockInfo]} with each
+    block's productivity bucket attached.
+
+    One batch lookup for every block across every task, so the backlog list
+    stays at a fixed query count no matter how many tasks are on it.
+    """
+    event_ids = [b.google_event_id for blocks in blocks_map.values() for b in blocks]
+    buckets = await calendar_block_repo.get_buckets_by_event_ids(db, user_id, event_ids)
+    return {
+        task_id: [
+            TaskBlockInfo.model_validate(b).model_copy(
+                update={"bucket": buckets.get(b.google_event_id)}
+            )
+            for b in blocks
+        ]
+        for task_id, blocks in blocks_map.items()
+    }
+
+
 async def _task_read_with_next_start(db: AsyncSession, task: "Task") -> TaskRead:
     """Build a TaskRead with next_scheduled_start and blocks populated from calendar_blocks."""
     next_starts = await calendar_block_repo.get_earliest_start_by_task_ids(db, [task.id])
     blocks_map = await calendar_block_repo.get_active_blocks_by_task_ids(db, [task.id])
-    blocks = [TaskBlockInfo.model_validate(b) for b in blocks_map.get(task.id, [])]
+    blocks_by_task = await _blocks_with_buckets(db, task.user_id, blocks_map)
     return TaskRead.model_validate(task).model_copy(
         update={
             "next_scheduled_start": next_starts.get(task.id),
-            "blocks": blocks,
+            "blocks": blocks_by_task.get(task.id, []),
         }
     )
 
@@ -123,10 +148,11 @@ async def list_tasks(
     task_ids = [t.id for t in tasks]
     next_starts = await calendar_block_repo.get_earliest_start_by_task_ids(db, task_ids)
     blocks_map = await calendar_block_repo.get_active_blocks_by_task_ids(db, task_ids)
+    blocks_by_task = await _blocks_with_buckets(db, current_user.id, blocks_map)
     reads = [
         TaskRead.model_validate(t).model_copy(update={
             "next_scheduled_start": next_starts.get(t.id),
-            "blocks": [TaskBlockInfo.model_validate(b) for b in blocks_map.get(t.id, [])],
+            "blocks": blocks_by_task.get(t.id, []),
         })
         for t in tasks
     ]

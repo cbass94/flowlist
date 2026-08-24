@@ -12,6 +12,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.calendar_block import CalendarBlock
+from app.models.event_color import EventColor
 
 
 # ── Read ─────────────────────────────────────────────────────────────────────
@@ -224,6 +225,31 @@ async def get_active_blocks_by_task_ids(
     for block in result.scalars().all():
         grouped.setdefault(block.task_id, []).append(block)
     return grouped
+
+
+async def get_buckets_by_event_ids(
+    session: AsyncSession,
+    user_id: int,
+    google_event_ids: list[str],
+) -> dict[str, str]:
+    """
+    Return {google_event_id: productivity bucket} for the given events.
+
+    Buckets come from the calendar color-coding feature (event_colors); this
+    lets the backlog list show each task in the same color as its calendar
+    block without an N+1. Events FlowList hasn't classified are simply absent
+    from the result, and rows the user has manually recolored are included —
+    the bucket still describes what the calendar actually looks like.
+    """
+    if not google_event_ids:
+        return {}
+    result = await session.execute(
+        select(EventColor.google_event_id, EventColor.bucket).where(
+            EventColor.user_id == user_id,
+            EventColor.google_event_id.in_(google_event_ids),
+        )
+    )
+    return {event_id: bucket for event_id, bucket in result.all()}
 
 
 async def get_earliest_start_by_task_ids(
