@@ -85,16 +85,13 @@ services:
       retries: 3
       start_period: 30s
 
-  # ── React frontend (Vite dev server) ─────────────────────────────────────────
+  # ── React frontend (production build served by Caddy on :5173) ──────────────
+  # Source is baked into the image at build time — rebuild to pick up changes.
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
-    env_file: .env
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules         # prevent host node_modules from clobbering container
     networks:
       - internal
 

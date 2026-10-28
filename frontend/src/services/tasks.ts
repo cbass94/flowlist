@@ -1,6 +1,5 @@
 import api from "./api";
 import type {
-  BlockDoneRequest,
   CompleteRequest,
   MoreWorkSuggestion,
   RescheduleAllOverdueResponse,

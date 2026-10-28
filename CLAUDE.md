@@ -197,10 +197,13 @@ a banner or aggressive highlight.
   `cd /c/Projects/flowlist && docker compose up -d --build frontend backend worker`
 - The worker container shares the backend image, so rebuild it whenever backend changes.
 - Frontend and backend run in Docker — there are no local node_modules or Python venv.
-- Adding a new npm package requires two steps (the anonymous node_modules volume must
-  be renewed so the container picks up the newly installed package):
-  1. `docker compose run --rm --no-deps frontend npm install`  ← updates package-lock.json
-  2. `docker compose up -d --build -V frontend`               ← rebuilds image + renews volume
+- The frontend is a production build (multi-stage Dockerfile: node builds dist/,
+  caddy:2-alpine serves it on :5173). No dev server, no HMR — every frontend change
+  needs `docker compose up -d --build frontend`. The build runs `tsc -b`, so type
+  errors (including unused imports) fail the build.
+- Adding a new npm package (the runtime image has no node, so use a throwaway one):
+  1. `docker run --rm -v "$PWD/frontend:/app" -w /app node:22-alpine npm install <pkg>`
+  2. `docker compose up -d --build frontend`
 
 ## Design Principles
 - Mobile-responsive web app (no native mobile app)

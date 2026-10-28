@@ -1,4 +1,5 @@
-FROM node:22-alpine
+# ── Build stage: type-check + bundle ─────────────────────────────────────────
+FROM node:22-alpine AS build
 
 WORKDIR /app
 
@@ -6,6 +7,14 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
+RUN npm run build
 
-# Dev: Vite dev server with HMR
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+# ── Serve stage: static files only ───────────────────────────────────────────
+# Production build served by Caddy — no Vite dev server, no HMR websocket,
+# no node_modules or source in the running image.
+FROM caddy:2-alpine
+
+COPY Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/dist /srv
+
+EXPOSE 5173

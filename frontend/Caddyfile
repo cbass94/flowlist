@@ -1,0 +1,18 @@
+# Static file server for the built SPA (dist/). The outer Caddy (caddy/Caddyfile)
+# proxies here and owns TLS-adjacent concerns, security headers, and logging.
+:5173 {
+    root * /srv
+
+    # Hashed bundles never change under the same name — cache forever.
+    header /assets/* Cache-Control "public, max-age=31536000, immutable"
+
+    # index.html must always be revalidated so a rebuild is picked up on the
+    # next load instead of a stale shell pointing at deleted bundles.
+    @shell not path /assets/*
+    header @shell Cache-Control "no-cache"
+
+    # SPA fallback: unknown paths serve index.html for client-side routing.
+    try_files {path} /index.html
+    file_server
+    encode gzip
+}
